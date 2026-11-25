@@ -226,6 +226,9 @@ export async function fetchMarketplaceCatalog(
   preferredCategories: string[];
   personalizationEnabled: boolean;
 }> {
+  // Authoritatively transition any expired auctions before catalog query
+  await Promise.resolve(supabase.rpc('close_expired_auctions')).catch(() => {});
+
   const [
     { data: rawAuctions, error: auctionsError },
     { data: rawSaved, error: savedError },
@@ -331,6 +334,9 @@ export async function fetchAuctionDetail(
   assetDocuments: AssetDocument[];
   comparableAuctions: AuctionItem[];
 }> {
+  // Authoritatively transition auction if ends_at <= now()
+  await Promise.resolve(supabase.rpc('close_auction_if_expired', { p_auction_id: auctionId })).catch(() => {});
+
   const [
     { data: row, error: auctionError },
     { data: rawBids, count: exactBidCount },

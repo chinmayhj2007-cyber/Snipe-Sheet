@@ -91,6 +91,10 @@ export async function POST(
     if (error.message.includes('Auction not found')) {
       return NextResponse.json({ error: 'Auction not found.' }, { status: 404 });
     }
+    if (error.message.includes('already ended')) {
+      // Authoritatively ensure auction is transitioned to 'ended' in DB
+      void supabase.rpc('close_auction_if_expired', { p_auction_id: auctionId });
+    }
     const safeMsg =
       error.message.includes('Only Bidder') ||
       error.message.includes('Sellers cannot bid') ||

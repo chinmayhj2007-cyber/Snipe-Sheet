@@ -1,22 +1,27 @@
 'use client';
 
 import { Clock, ShieldAlert } from 'lucide-react';
-import { memo, useSyncExternalStore } from 'react';
+import { memo, useEffect, useRef, useSyncExternalStore } from 'react';
+import { getAuthoritativeNow, syncServerClock } from '@/lib/marketplace/server-clock';
 
 interface CountdownTimerProps {
   startsAt: string;
   endsAt: string;
   status: string;
   compact?: boolean;
+  auctionId?: string;
+  onExpire?: () => void;
+  className?: string;
 }
 
 // Single shared 1s clock across all mounted timers; pauses automatically when tab is hidden
-let sharedNow: number | null = null;
+let sharedAuthoritativeNow: number | null = null;
 let tickerId: number | null = null;
 const listeners = new Set<() => void>();
+const expiredAuctionIdsNotified = new Set<string>();
 
 function notifyListeners() {
-  sharedNow = Date.now();
+  sharedAuthoritativeNow = getAuthoritativeNow();
   listeners.forEach((cb) => cb());
 }
 
@@ -28,7 +33,10 @@ function handleVisibilityChange() {
       tickerId = null;
     }
   } else {
-    notifyListeners();
+    // Tab became active: immediately resync with server and notify
+    void syncServerClock().then(() => {
+      notifyListeners();
+    });
     if (listeners.size > 0 && tickerId === null) {
       tickerId = window.setInterval(notifyListeners, 1000);
     }
@@ -38,8 +46,8 @@ function handleVisibilityChange() {
 function subscribeClock(callback: () => void) {
   listeners.add(callback);
   if (typeof window !== 'undefined') {
-    if (sharedNow === null || tickerId === null) {
-      sharedNow = Date.now();
+    if (sharedAuthoritativeNow === null || tickerId === null) {
+      sharedAuthoritativeNow = getAuthoritativeNow();
     }
     if (listeners.size === 1) {
       if (typeof document === 'undefined' || !document.hidden) {
@@ -61,30 +69,38 @@ function subscribeClock(callback: () => void) {
 }
 
 function getClientClock(): number | null {
-  if (typeof window !== 'undefined' && sharedNow === null) {
-    sharedNow = Date.now();
+  if (typeof window !== 'undefined' && sharedAuthoritativeNow === null) {
+    sharedAuthoritativeNow = getAuthoritativeNow();
   }
-  return sharedNow;
+  return sharedAuthoritativeNow;
 }
 
 function getServerClock(): number | null {
   return null;
 }
 
-function formatDuration(ms: number): string {
+/**
+ * Format remaining duration.
+ * Full format: 00 DAYS : 00 HOURS : 04 MINUTES : 32 SECONDS
+ * Compact format: 00d : 00h : 04m : 32s
+ */
+function formatDuration(ms: number, compact = false): string {
   const totalSeconds = Math.max(0, Math.floor(ms / 1000));
   const days = Math.floor(totalSeconds / 86400);
   const hours = Math.floor((totalSeconds % 86400) / 3600);
   const minutes = Math.floor((totalSeconds % 3600) / 60);
   const seconds = totalSeconds % 60;
 
-  if (days > 0) {
-    return `${days}d ${hours}h ${minutes}m`;
+  const dd = String(days).padStart(2, '0');
+  const hh = String(hours).padStart(2, '0');
+  const mm = String(minutes).padStart(2, '0');
+  const ss = String(seconds).padStart(2, '0');
+
+  if (compact) {
+    return `${dd}d : ${hh}h : ${mm}m : ${ss}s`;
   }
-  if (hours > 0) {
-    return `${hours}h ${String(minutes).padStart(2, '0')}m ${String(seconds).padStart(2, '0')}s`;
-  }
-  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+
+  return `${dd} DAYS : ${hh} HOURS : ${mm} MINUTES : ${ss} SECONDS`;
 }
 
 export const CountdownTimer = memo(function CountdownTimer({
@@ -92,57 +108,83 @@ export const CountdownTimer = memo(function CountdownTimer({
   endsAt,
   status,
   compact = false,
+  auctionId,
+  onExpire,
+  className = '',
 }: CountdownTimerProps) {
   const nowMs = useSyncExternalStore(subscribeClock, getClientClock, getServerClock);
+  const firedExpireRef = useRef(false);
 
-  const startMs = new Date(startsAt).getTime();
-  const endMs = new Date(endsAt).getTime();
+  const startMs = startsAt ? new Date(startsAt).getTime() : NaN;
+  const endMs = endsAt ? new Date(endsAt).getTime() : NaN;
 
-  // During initial SSR snapshot (null), render neutral placeholder matching layout
+  // Auto-trigger expiration closure when timer hits 0
+  useEffect(() => {
+    if (nowMs === null || Number.isNaN(endMs)) return;
+    if (status === 'active' && nowMs >= endMs && !firedExpireRef.current) {
+      firedExpireRef.current = true;
+      onExpire?.();
+
+      if (auctionId && !expiredAuctionIdsNotified.has(auctionId)) {
+        expiredAuctionIdsNotified.add(auctionId);
+        void fetch(`/api/auctions/${auctionId}/close`, { method: 'POST' }).catch(() => {});
+      }
+    }
+  }, [nowMs, endMs, status, auctionId, onExpire]);
+
+  // Initial SSR snapshot (null) or invalid date
   if (nowMs === null || Number.isNaN(startMs) || Number.isNaN(endMs)) {
     return (
-      <span className="inline-flex items-center gap-1 font-mono text-xs font-semibold text-white/75">
+      <span className={`inline-flex items-center gap-1.5 font-mono text-xs font-semibold text-white/70 ${className}`}>
         <Clock className="h-3.5 w-3.5 text-[#a7adb6]" aria-hidden="true" />
-        <span>{status === 'active' ? '--:--' : 'Ended'}</span>
+        <span>{status === 'active' ? '00 DAYS : 00 HOURS : --:--' : 'AUCTION ENDED'}</span>
       </span>
     );
   }
 
+  // Ended state
   if (status !== 'active' || nowMs >= endMs) {
     return (
-      <span className="inline-flex items-center gap-1 text-xs font-medium text-white/50">
-        <Clock className="h-3.5 w-3.5" aria-hidden="true" />
-        Ended
+      <span
+        className={`inline-flex items-center gap-1.5 rounded-full border border-rose-400/30 bg-rose-950/60 px-2.5 py-0.5 text-xs font-semibold tracking-wider text-rose-200 ${className}`}
+      >
+        <Clock className="h-3.5 w-3.5 text-rose-300" aria-hidden="true" />
+        <span>AUCTION ENDED</span>
       </span>
     );
   }
 
+  // Upcoming state (starts in future)
   if (nowMs < startMs) {
+    const diff = startMs - nowMs;
     return (
-      <span className="inline-flex items-center gap-1 text-xs font-medium text-white/75">
+      <span
+        className={`inline-flex items-center gap-1.5 rounded-full border border-white/20 bg-white/[0.05] px-2.5 py-0.5 font-mono text-xs font-medium text-white/80 ${className}`}
+      >
         <Clock className="h-3.5 w-3.5 text-[#a7adb6]" aria-hidden="true" />
-        Starts in {formatDuration(startMs - nowMs)}
+        <span>Starts in {formatDuration(diff, compact)}</span>
       </span>
     );
   }
 
-  const remainingMs = endMs - nowMs;
+  // Active state
+  const remainingMs = Math.max(0, endMs - nowMs);
   const isSnipeWindow = remainingMs <= 30_000;
 
   return (
     <span
-      className={`inline-flex items-center gap-1.5 font-mono text-xs font-semibold tabular-nums ${
+      className={`inline-flex flex-wrap items-center gap-1.5 font-mono text-xs font-semibold tabular-nums ${
         isSnipeWindow ? 'text-amber-300' : 'text-white/90'
-      }`}
+      } ${className}`}
     >
       {isSnipeWindow ? (
         <ShieldAlert className="h-3.5 w-3.5 animate-pulse text-amber-300" aria-hidden="true" />
       ) : (
         <Clock className="h-3.5 w-3.5 text-[#a7adb6]" aria-hidden="true" />
       )}
-      <span>{formatDuration(remainingMs)}</span>
-      {isSnipeWindow && !compact ? (
-        <span className="rounded-full border border-amber-300/35 bg-amber-500/15 px-1.5 py-0.5 font-sans text-[10px] font-medium text-amber-200">
+      <span className="tracking-tight">{formatDuration(remainingMs, compact)}</span>
+      {isSnipeWindow ? (
+        <span className="rounded-full border border-amber-300/40 bg-amber-500/20 px-1.5 py-0.5 font-sans text-[10px] font-medium text-amber-200">
           30s Anti-Snipe
         </span>
       ) : null}

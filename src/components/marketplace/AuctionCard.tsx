@@ -269,7 +269,13 @@ export const AuctionCard = memo(function AuctionCard({
           <div className="flex items-end justify-between gap-2">
             <div>
               <p className="text-[10px] font-medium uppercase tracking-wider text-white/50">
-                {auction.highest_bidder_id ? 'Current Bid' : 'Starting Bid'}
+                {phase === 'ended' || auction.status === 'ended'
+                  ? auction.highest_bidder_id
+                    ? 'Winning Bid'
+                    : 'Unsold'
+                  : auction.highest_bidder_id
+                    ? 'Current Bid'
+                    : 'Starting Bid'}
               </p>
               <p className="mt-0.5 text-lg font-semibold tracking-tight text-white">
                 {formatINR(auction.current_price)}
@@ -283,13 +289,14 @@ export const AuctionCard = memo(function AuctionCard({
 
             <div className="text-right">
               <p className="text-[10px] font-medium uppercase tracking-wider text-white/50">
-                Time Left
+                {phase === 'ended' || auction.status === 'ended' ? 'Status' : 'Time Left'}
               </p>
               <div className="mt-0.5">
                 <CountdownTimer
                   startsAt={auction.starts_at}
                   endsAt={auction.ends_at}
                   status={auction.status}
+                  auctionId={auction.id}
                   compact
                 />
               </div>
@@ -311,7 +318,12 @@ export const AuctionCard = memo(function AuctionCard({
               prefetch
               className="smoky-cta-btn flex h-10 w-full items-center justify-center gap-1.5 rounded-full text-xs font-medium text-white transition focus:outline-none focus-visible:ring-2 focus-visible:ring-white/45"
             >
-              {viewerRole === 'bidder' && !isOwnListing && phase === 'live' ? (
+              {phase === 'ended' || auction.status === 'ended' ? (
+                <>
+                  <span>View Ended Auction</span>
+                  <ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" />
+                </>
+              ) : viewerRole === 'bidder' && !isOwnListing && phase === 'live' ? (
                 <>
                   <Gavel className="h-3.5 w-3.5" aria-hidden="true" />
                   <span>Place Bid</span>

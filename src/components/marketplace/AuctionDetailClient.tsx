@@ -27,6 +27,7 @@ import { CountdownTimer } from '@/components/marketplace/CountdownTimer';
 import { MarketplaceNavbar } from '@/components/marketplace/MarketplaceNavbar';
 import { ShinyButton } from '@/components/ui/shiny-button';
 import { calculateTrueCost, computePriceInsights } from '@/lib/marketplace/intelligence';
+import { maskBidderName } from '@/lib/marketplace/privacy';
 import {
   type AssetDocument,
   type AuctionExtensionEntry,
@@ -293,6 +294,11 @@ export function AuctionDetailClient({
     if (bidInFlightRef.current || submitting) return;
     setErrorMessage(null);
     setSuccessMessage(null);
+
+    if (auction.status === 'ended' || phase === 'ended') {
+      setErrorMessage('This auction has already ended.');
+      return;
+    }
 
     const amountNum = Number(bidAmount);
     const proxyNum = enableProxy && proxyMaxInput.trim() ? Number(proxyMaxInput) : null;
@@ -827,6 +833,8 @@ export function AuctionDetailClient({
                     startsAt={auction.starts_at}
                     endsAt={auction.ends_at}
                     status={auction.status}
+                    auctionId={auction.id}
+                    onExpire={() => router.refresh()}
                   />
                 </div>
 
@@ -844,7 +852,13 @@ export function AuctionDetailClient({
                   <div className="flex items-center justify-between gap-3">
                     <div>
                       <p className="text-[11px] font-medium uppercase tracking-wider text-white/55">
-                        {auction.highest_bidder_id ? 'Current Highest Bid' : 'Starting Price'}
+                        {phase === 'ended' || auction.status === 'ended'
+                          ? auction.highest_bidder_id
+                            ? 'Final Winning Bid'
+                            : 'Starting Price (Unsold)'
+                          : auction.highest_bidder_id
+                            ? 'Current Highest Bid'
+                            : 'Starting Price'}
                       </p>
                       <p className="mt-0.5 text-3xl font-semibold tracking-tight text-white">
                         {formatINR(auction.current_price)}
@@ -854,7 +868,7 @@ export function AuctionDetailClient({
                     {isLeading ? (
                       <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-300/35 bg-emerald-950/60 px-3 py-1 text-xs font-semibold text-emerald-200">
                         <Trophy className="h-3.5 w-3.5" aria-hidden="true" />
-                        You&apos;re Leading
+                        {phase === 'ended' || auction.status === 'ended' ? 'Winning Bidder' : "You're Leading"}
                       </span>
                     ) : null}
                   </div>
@@ -1057,24 +1071,89 @@ export function AuctionDetailClient({
                       </div>
                     </div>
                   ) : (
-                    <div className="space-y-3 rounded-2xl border border-white/15 bg-white/[0.04] p-4 text-center text-xs text-white/75">
-                      <p>
-                        {auction.paused
-                          ? 'This listing is temporarily paused.'
-                          : phase === 'upcoming'
-                            ? 'This auction has not opened for bidding yet.'
-                            : 'This auction has closed.'}
-                      </p>
-                      {phase === 'ended' && isLeading ? (
-                        <button
-                          type="button"
-                          onClick={handleFinalizeOrder}
-                          disabled={actionLoading}
-                          className="smoky-cta-btn inline-flex h-10 cursor-pointer items-center justify-center gap-2 rounded-full px-5 text-xs font-semibold text-white"
+                    <div className="space-y-4 rounded-3xl border border-white/20 bg-[#0d0f15]/90 p-5 text-xs text-white/85 shadow-xl backdrop-blur-xl">
+                      <div className="flex items-center justify-between gap-2 border-b border-white/10 pb-3">
+                        <div className="flex items-center gap-2">
+                          <Gavel className="h-4 w-4 text-[#a7adb6]" aria-hidden="true" />
+                          <span className="font-semibold uppercase tracking-wider text-white">
+                            Auction Finalized
+                          </span>
+                        </div>
+                        <span
+                          className={`rounded-full border px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wider ${
+                            !auction.highest_bidder_id
+                              ? 'border-white/20 bg-white/10 text-white/70'
+                              : auction.reserve_price !== null && auction.current_price < auction.reserve_price
+                                ? 'border-amber-400/30 bg-amber-950/60 text-amber-200'
+                                : 'border-emerald-400/30 bg-emerald-950/60 text-emerald-200'
+                          }`}
                         >
-                          <CheckCircle2 className="h-4 w-4 text-emerald-300" />
-                          {actionLoading ? 'Generating Order...' : 'Proceed to Winner Checkout'}
-                        </button>
+                          {!auction.highest_bidder_id
+                            ? 'Unsold (No Bids)'
+                            : auction.reserve_price !== null && auction.current_price < auction.reserve_price
+                              ? 'Reserve Unmet'
+                              : 'Sold'}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3 text-xs">
+                        <div>
+                          <span className="text-white/50">Winning / Final Price</span>
+                          <p className="mt-0.5 text-base font-semibold text-white">
+                            {formatINR(auction.current_price)}
+                          </p>
+                        </div>
+                        <div>
+                          <span className="text-white/50">Winning Bidder</span>
+                          <p className="mt-0.5 font-medium text-white">
+                            {auction.highest_bidder_id
+                              ? isLeading
+                                ? `You (${maskBidderName(user.displayName)})`
+                                : maskBidderName(auction.highest_bidder_name)
+                              : 'None (Unsold)'}
+                          </p>
+                        </div>
+                        <div>
+                          <span className="text-white/50">Total Bids</span>
+                          <p className="mt-0.5 font-medium text-white">{auction.bid_count ?? 0} placed</p>
+                        </div>
+                        <div>
+                          <span className="text-white/50">FairClose Extensions</span>
+                          <p className="mt-0.5 font-medium text-white">{auction.extensions_count} applied</p>
+                        </div>
+                      </div>
+
+                      {auction.reserve_price !== null ? (
+                        <div className="rounded-xl border border-white/10 bg-white/[0.03] p-2.5 text-[11px] text-white/70">
+                          <span className="font-medium text-white">Reserve Status: </span>
+                          {auction.current_price >= auction.reserve_price ? (
+                            <span className="font-semibold text-emerald-300">Reserve Met</span>
+                          ) : (
+                            <span className="font-semibold text-amber-300">
+                              Reserve Not Met ({formatINR(auction.current_price)} vs Reserve {formatINR(auction.reserve_price)})
+                            </span>
+                          )}
+                        </div>
+                      ) : null}
+
+                      {isLeading && (!auction.reserve_price || auction.current_price >= auction.reserve_price) ? (
+                        <div className="rounded-2xl border border-emerald-400/30 bg-emerald-950/40 p-4 text-center">
+                          <p className="text-sm font-semibold text-emerald-200">
+                            Congratulations! You won this auction.
+                          </p>
+                          <p className="mt-1 text-xs text-white/70">
+                            Complete your escrow payment and provide delivery instructions.
+                          </p>
+                          <button
+                            type="button"
+                            onClick={handleFinalizeOrder}
+                            disabled={actionLoading}
+                            className="smoky-cta-btn mt-3 inline-flex h-10 cursor-pointer items-center justify-center gap-2 rounded-full px-6 text-xs font-semibold text-white"
+                          >
+                            <CheckCircle2 className="h-4 w-4 text-emerald-300" />
+                            {actionLoading ? 'Preparing Checkout...' : 'Proceed to Winner Checkout'}
+                          </button>
+                        </div>
                       ) : null}
                     </div>
                   )
@@ -1086,11 +1165,17 @@ export function AuctionDetailClient({
                     </div>
                     <p className="text-white/65">
                       {isOwnListing
-                        ? `Views: ${auction.views_count ?? 0}${
-                            auction.reserve_price !== null
-                              ? ` • Hidden Reserve: ${formatINR(auction.reserve_price)}`
-                              : ''
-                          }`
+                        ? phase === 'ended' || auction.status === 'ended'
+                          ? `Auction Ended · ${
+                              auction.highest_bidder_id
+                                ? `Sold at ${formatINR(auction.current_price)} to ${maskBidderName(auction.highest_bidder_name)}`
+                                : 'Unsold (No bids)'
+                            }`
+                          : `Views: ${auction.views_count ?? 0}${
+                              auction.reserve_price !== null
+                                ? ` • Hidden Reserve: ${formatINR(auction.reserve_price)}`
+                                : ''
+                            }`
                         : 'Accounts other than Bidders view this auction in read-only mode.'}
                     </p>
                     {isOwnListing && phase === 'live' ? (
