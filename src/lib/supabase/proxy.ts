@@ -24,18 +24,39 @@ function isAuthRoute(pathname: string): boolean {
   );
 }
 
+function redirectWithCookies(targetUrl: URL, sourceResponse: NextResponse): NextResponse {
+  const redirectResponse = NextResponse.redirect(targetUrl);
+  sourceResponse.cookies.getAll().forEach((cookie) => {
+    redirectResponse.cookies.set(cookie);
+  });
+  return redirectResponse;
+}
+
 export async function updateSession(request: NextRequest) {
   const { url, anonKey, isConfigured } = getSupabaseEnv();
   const pathname = request.nextUrl.pathname;
 
   if (!isConfigured) {
     if (isProtectedPath(pathname)) {
-      const loginUrl = request.nextUrl.clone();
-      loginUrl.pathname = '/login';
+      const loginUrl = new URL('/login', request.url);
       loginUrl.searchParams.set('notice', 'demo');
       return NextResponse.redirect(loginUrl);
     }
     return NextResponse.next({ request });
+  }
+
+  // Skip remote auth revalidation during background Link prefetches when session cookies exist;
+  // Server Components still enforce authoritative supabase.auth.getUser() before rendering data.
+  const isPrefetch =
+    request.headers.get('next-router-prefetch') === '1' ||
+    request.headers.get('purpose') === 'prefetch';
+  if (isPrefetch) {
+    const hasAuthCookie = request.cookies
+      .getAll()
+      .some((c) => c.name.startsWith('sb-') && c.name.includes('auth-token'));
+    if (hasAuthCookie || !isProtectedPath(pathname)) {
+      return NextResponse.next({ request });
+    }
   }
 
   let supabaseResponse = NextResponse.next({
@@ -65,16 +86,11 @@ export async function updateSession(request: NextRequest) {
   } = await supabase.auth.getUser();
 
   if (!user && isProtectedPath(pathname)) {
-    const loginUrl = request.nextUrl.clone();
-    loginUrl.pathname = '/login';
-    loginUrl.searchParams.delete('error');
-    return NextResponse.redirect(loginUrl);
+    return redirectWithCookies(new URL('/login', request.url), supabaseResponse);
   }
 
   if (user && isAuthRoute(pathname)) {
-    const dashboardUrl = request.nextUrl.clone();
-    dashboardUrl.pathname = '/dashboard';
-    return NextResponse.redirect(dashboardUrl);
+    return redirectWithCookies(new URL('/dashboard', request.url), supabaseResponse);
   }
 
   return supabaseResponse;

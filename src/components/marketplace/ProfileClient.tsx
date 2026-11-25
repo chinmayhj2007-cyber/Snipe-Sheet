@@ -1,7 +1,7 @@
 'use client';
 
 import { Gavel, Loader2, ShieldCheck, Store, User } from 'lucide-react';
-import { type FormEvent, useState } from 'react';
+import { type FormEvent, useRef, useState } from 'react';
 import { LogoutButton } from '@/components/auth/LogoutButton';
 import { MarketplaceNavbar } from '@/components/marketplace/MarketplaceNavbar';
 import type { MarketplaceUser } from '@/lib/marketplace/types';
@@ -15,6 +15,7 @@ interface ProfileClientProps {
 }
 
 export function ProfileClient({ user, stats }: ProfileClientProps) {
+  const inFlightRef = useRef(false);
   const [fullName, setFullName] = useState(user.fullName || user.displayName);
   const [saving, setSaving] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
@@ -25,7 +26,7 @@ export function ProfileClient({ user, stats }: ProfileClientProps) {
 
   async function handleSaveProfile(e: FormEvent) {
     e.preventDefault();
-    if (saving) return;
+    if (inFlightRef.current || saving) return;
     setErrorMessage(null);
     setStatusMessage(null);
 
@@ -35,6 +36,7 @@ export function ProfileClient({ user, stats }: ProfileClientProps) {
       return;
     }
 
+    inFlightRef.current = true;
     setSaving(true);
     try {
       const res = await fetch('/api/profile', {
@@ -53,6 +55,7 @@ export function ProfileClient({ user, stats }: ProfileClientProps) {
     } catch {
       setErrorMessage('Network error while updating profile.');
     } finally {
+      inFlightRef.current = false;
       setSaving(false);
     }
   }

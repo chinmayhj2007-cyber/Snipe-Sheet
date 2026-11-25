@@ -14,27 +14,36 @@ export function MarketplaceNavbar({ user }: MarketplaceNavbarProps) {
   const isSeller = user.role === 'seller';
   const homeHref = isSeller ? '/seller/home' : '/bidder/home';
   const savedHref = isSeller ? '/seller/saved' : '/bidder/saved';
-
-  const navItems = [
-    { href: homeHref, label: 'Home', icon: Home },
-    { href: '/search', label: 'Search', icon: Search },
-    { href: savedHref, label: 'Saved', icon: Bookmark },
-  ];
+  const isOnHome = pathname === '/bidder/home' || pathname === '/seller/home';
 
   const initial = user.displayName.trim().charAt(0).toUpperCase() || 'S';
 
+  function handleSearchNavClick(e: React.MouseEvent<HTMLAnchorElement>) {
+    if (!isOnHome) return;
+    const searchEl = document.getElementById('unified-auction-search') as HTMLInputElement | null;
+    if (searchEl) {
+      e.preventDefault();
+      searchEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      searchEl.focus({ preventScroll: true });
+    }
+  }
+
   return (
-    <header className="sticky top-0 z-40 border-b border-white/15 bg-[#090b0f]/80 backdrop-blur-2xl">
+    <header className="sticky top-0 z-40 border-b border-white/15 bg-[#090b0f]/85 backdrop-blur-xl">
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-3 px-4 sm:px-6 lg:px-8">
         {/* Left: Snipe Shield logo & brand */}
         <Link
           href={homeHref}
+          prefetch
           className="flex shrink-0 items-center gap-2.5 rounded-full py-1 pr-2 transition hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src="/snipe-shield-logo.webp"
             alt="Snipe Shield"
+            width={32}
+            height={32}
+            decoding="async"
             className="h-8 w-8 rounded-lg object-contain"
           />
           <div className="flex items-center gap-2">
@@ -58,31 +67,55 @@ export function MarketplaceNavbar({ user }: MarketplaceNavbarProps) {
           </div>
         </Link>
 
-        {/* Right: Primary Navigation + Seller '+' Sell CTA + Profile */}
+        {/* Right: Unified Navigation */}
         <nav aria-label="Primary navigation" className="flex items-center gap-1.5 sm:gap-2">
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                aria-label={item.label}
-                className={`flex h-9 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40 sm:px-3.5 ${
-                  active
-                    ? 'border-white/35 bg-white/15 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.28)]'
-                    : 'border-white/10 bg-white/[0.03] text-white/75 hover:border-white/25 hover:bg-white/[0.08] hover:text-white'
-                }`}
-              >
-                <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                <span className="hidden md:inline">{item.label}</span>
-              </Link>
-            );
-          })}
+          <Link
+            href={homeHref}
+            prefetch
+            aria-label="Home"
+            className={`flex h-9 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40 sm:px-3.5 ${
+              isOnHome
+                ? 'border-white/35 bg-white/15 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.28)]'
+                : 'border-white/10 bg-white/[0.03] text-white/75 hover:border-white/25 hover:bg-white/[0.08] hover:text-white'
+            }`}
+          >
+            <Home className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            <span className="hidden md:inline">Home</span>
+          </Link>
+
+          <Link
+            href="/search"
+            prefetch
+            onClick={handleSearchNavClick}
+            aria-label="Search"
+            className={`flex h-9 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40 sm:px-3.5 ${
+              pathname === '/search'
+                ? 'border-white/35 bg-white/15 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.28)]'
+                : 'border-white/10 bg-white/[0.03] text-white/75 hover:border-white/25 hover:bg-white/[0.08] hover:text-white'
+            }`}
+          >
+            <Search className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            <span className="hidden md:inline">Search</span>
+          </Link>
+
+          <Link
+            href={savedHref}
+            prefetch
+            aria-label="Saved"
+            className={`flex h-9 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40 sm:px-3.5 ${
+              pathname === savedHref
+                ? 'border-white/35 bg-white/15 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.28)]'
+                : 'border-white/10 bg-white/[0.03] text-white/75 hover:border-white/25 hover:bg-white/[0.08] hover:text-white'
+            }`}
+          >
+            <Bookmark className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            <span className="hidden md:inline">Saved</span>
+          </Link>
 
           {isSeller ? (
             <Link
               href="/seller/create-listing"
+              prefetch
               aria-label="Sell New Item"
               className={`smoky-cta-btn flex h-9 items-center gap-1.5 rounded-full px-3 text-xs font-semibold text-white transition focus:outline-none focus-visible:ring-2 focus-visible:ring-white/50 sm:px-4 ${
                 pathname === '/seller/create-listing' ? 'ring-2 ring-white/40' : ''
@@ -95,6 +128,7 @@ export function MarketplaceNavbar({ user }: MarketplaceNavbarProps) {
 
           <Link
             href="/profile"
+            prefetch
             aria-label="Profile"
             className={`flex h-9 items-center gap-2 rounded-full border pl-1.5 pr-3 text-xs font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40 ${
               pathname === '/profile'

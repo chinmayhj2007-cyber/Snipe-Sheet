@@ -1,13 +1,67 @@
 'use client';
 
 import { Clock, ShieldAlert } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { memo, useSyncExternalStore } from 'react';
 
 interface CountdownTimerProps {
   startsAt: string;
   endsAt: string;
   status: string;
   compact?: boolean;
+}
+
+// Single shared 1s clock across all mounted timers; pauses automatically when tab is hidden
+let sharedNow = Date.now();
+let tickerId: number | null = null;
+const listeners = new Set<() => void>();
+
+function notifyListeners() {
+  sharedNow = Date.now();
+  listeners.forEach((cb) => cb());
+}
+
+function handleVisibilityChange() {
+  if (typeof document === 'undefined') return;
+  if (document.hidden) {
+    if (tickerId !== null) {
+      window.clearInterval(tickerId);
+      tickerId = null;
+    }
+  } else {
+    notifyListeners();
+    if (listeners.size > 0 && tickerId === null) {
+      tickerId = window.setInterval(notifyListeners, 1000);
+    }
+  }
+}
+
+function subscribeClock(callback: () => void) {
+  listeners.add(callback);
+  if (listeners.size === 1 && typeof window !== 'undefined') {
+    sharedNow = Date.now();
+    if (typeof document === 'undefined' || !document.hidden) {
+      tickerId = window.setInterval(notifyListeners, 1000);
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+  }
+  return () => {
+    listeners.delete(callback);
+    if (listeners.size === 0 && typeof window !== 'undefined') {
+      if (tickerId !== null) {
+        window.clearInterval(tickerId);
+        tickerId = null;
+      }
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    }
+  };
+}
+
+function getClientClock() {
+  return sharedNow;
+}
+
+function getServerClock() {
+  return 0;
 }
 
 function formatDuration(ms: number): string {
@@ -26,24 +80,26 @@ function formatDuration(ms: number): string {
   return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 }
 
-export function CountdownTimer({
+export const CountdownTimer = memo(function CountdownTimer({
   startsAt,
   endsAt,
   status,
   compact = false,
 }: CountdownTimerProps) {
-  const [nowMs, setNowMs] = useState<number>(() => Date.now());
-
-  useEffect(() => {
-    setNowMs(Date.now());
-    const id = window.setInterval(() => {
-      setNowMs(Date.now());
-    }, 1000);
-    return () => window.clearInterval(id);
-  }, [startsAt, endsAt]);
+  const nowMs = useSyncExternalStore(subscribeClock, getClientClock, getServerClock);
 
   const startMs = new Date(startsAt).getTime();
   const endMs = new Date(endsAt).getTime();
+
+  // During initial SSR snapshot (0), render neutral placeholder matching layout
+  if (nowMs === 0) {
+    return (
+      <span className="inline-flex items-center gap-1 font-mono text-xs font-semibold text-white/75">
+        <Clock className="h-3.5 w-3.5 text-[#a7adb6]" aria-hidden="true" />
+        <span>{status === 'active' ? '--:--' : 'Ended'}</span>
+      </span>
+    );
+  }
 
   if (status !== 'active' || nowMs >= endMs) {
     return (
@@ -85,4 +141,4 @@ export function CountdownTimer({
       ) : null}
     </span>
   );
-}
+});

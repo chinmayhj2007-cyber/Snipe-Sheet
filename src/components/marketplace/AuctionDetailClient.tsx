@@ -5,14 +5,12 @@ import {
   Bookmark,
   Bot,
   Gavel,
-  Loader2,
   ShieldCheck,
   Store,
   Trophy,
 } from 'lucide-react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { type FormEvent, useEffect, useState } from 'react';
+import { type FormEvent, useEffect, useRef, useState } from 'react';
 import { CountdownTimer } from '@/components/marketplace/CountdownTimer';
 import { MarketplaceNavbar } from '@/components/marketplace/MarketplaceNavbar';
 import { ShinyButton } from '@/components/ui/shiny-button';
@@ -40,7 +38,8 @@ export function AuctionDetailClient({
   initialSaved,
   initialMyProxyMax,
 }: AuctionDetailClientProps) {
-  const router = useRouter();
+  const bidInFlightRef = useRef(false);
+  const saveInFlightRef = useRef(false);
   const [auction, setAuction] = useState<AuctionItem>(initialAuction);
   const [bids, setBids] = useState<BidEntry[]>(initialBids);
   const [isSaved, setIsSaved] = useState(initialSaved);
@@ -137,8 +136,11 @@ export function AuctionDetailClient({
   }, [auction.id, user.id]);
 
   async function handleToggleSave() {
-    if (savingWatchlist) return;
+    if (saveInFlightRef.current || savingWatchlist) return;
+    saveInFlightRef.current = true;
     setSavingWatchlist(true);
+    const prev = isSaved;
+    setIsSaved(!prev);
     try {
       const res = await fetch('/api/saved', {
         method: 'POST',
@@ -148,15 +150,20 @@ export function AuctionDetailClient({
       if (res.ok) {
         const data = (await res.json()) as { saved: boolean };
         setIsSaved(data.saved);
+      } else {
+        setIsSaved(prev);
       }
+    } catch {
+      setIsSaved(prev);
     } finally {
+      saveInFlightRef.current = false;
       setSavingWatchlist(false);
     }
   }
 
   async function handlePlaceBid(e?: FormEvent) {
     e?.preventDefault();
-    if (submitting) return;
+    if (bidInFlightRef.current || submitting) return;
     setErrorMessage(null);
     setSuccessMessage(null);
 
@@ -173,6 +180,7 @@ export function AuctionDetailClient({
       return;
     }
 
+    bidInFlightRef.current = true;
     setSubmitting(true);
 
     try {
@@ -189,6 +197,8 @@ export function AuctionDetailClient({
         error?: string;
         is_leading?: boolean;
         current_price?: number;
+        highest_bidder_id?: string;
+        ends_at?: string;
         extended?: boolean;
       };
 
@@ -200,6 +210,14 @@ export function AuctionDetailClient({
       if (proxyNum !== null) {
         setMyProxyMax(proxyNum);
       }
+
+      setAuction((prev) => ({
+        ...prev,
+        current_price: Number(data.current_price ?? prev.current_price),
+        highest_bidder_id: data.highest_bidder_id ?? prev.highest_bidder_id,
+        ends_at: data.ends_at ?? prev.ends_at,
+        extensions_count: data.extended ? prev.extensions_count + 1 : prev.extensions_count,
+      }));
 
       if (data.is_leading) {
         setSuccessMessage(
@@ -214,11 +232,10 @@ export function AuctionDetailClient({
           )}.`
         );
       }
-
-      router.refresh();
     } catch {
       setErrorMessage('Network error while submitting bid.');
     } finally {
+      bidInFlightRef.current = false;
       setSubmitting(false);
     }
   }

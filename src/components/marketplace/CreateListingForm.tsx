@@ -35,6 +35,7 @@ function toLocalDateTimeInput(date: Date): string {
 export function CreateListingForm({ user }: CreateListingFormProps) {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const publishInFlightRef = useRef(false);
 
   const initialDates = useMemo(() => {
     const start = new Date();
@@ -109,7 +110,7 @@ export function CreateListingForm({ user }: CreateListingFormProps) {
 
   async function handlePublish(e?: FormEvent) {
     e?.preventDefault();
-    if (publishing || uploadingImages) return;
+    if (publishInFlightRef.current || publishing || uploadingImages) return;
     setErrorMessage(null);
 
     const startNum = Number(startingPrice);
@@ -148,6 +149,7 @@ export function CreateListingForm({ user }: CreateListingFormProps) {
       return;
     }
 
+    publishInFlightRef.current = true;
     setPublishing(true);
 
     try {
@@ -175,10 +177,10 @@ export function CreateListingForm({ user }: CreateListingFormProps) {
       }
 
       router.push(`/auctions/${data.id}`);
-      router.refresh();
     } catch {
       setErrorMessage('Network error while publishing auction.');
     } finally {
+      publishInFlightRef.current = false;
       setPublishing(false);
     }
   }

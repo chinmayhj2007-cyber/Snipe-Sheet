@@ -1,12 +1,13 @@
 'use client';
 
-import { Flame, PackagePlus, Search, Sparkles, Store } from 'lucide-react';
+import { Flame, PackagePlus, Sparkles, Store } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { type FormEvent, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AuctionCard } from '@/components/marketplace/AuctionCard';
 import { CategoryGrid } from '@/components/marketplace/CategoryGrid';
 import { MarketplaceNavbar } from '@/components/marketplace/MarketplaceNavbar';
+import { UnifiedSearchBar } from '@/components/marketplace/UnifiedSearchBar';
 import { ShinyButton } from '@/components/ui/shiny-button';
 import {
   type AuctionItem,
@@ -29,7 +30,7 @@ export function SellerHomeView({
   const router = useRouter();
   const [auctions, setAuctions] = useState<AuctionItem[]>(initialAuctions);
   const [savedSet, setSavedSet] = useState<Set<string>>(() => new Set(initialSavedIds));
-  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState<string | undefined>(undefined);
 
   useEffect(() => {
     const supabase = getSupabaseBrowserClient();
@@ -39,29 +40,26 @@ export function SellerHomeView({
       .channel('seller-home-auctions')
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'auctions' },
+        { event: 'UPDATE', schema: 'public', table: 'auctions' },
         (payload) => {
-          if (payload.eventType === 'UPDATE' && payload.new) {
-            const updated = payload.new as Partial<AuctionItem> & { id: string };
-            setAuctions((prev) =>
-              prev.map((item) =>
-                item.id === updated.id
-                  ? {
-                      ...item,
-                      current_price: Number(updated.current_price ?? item.current_price),
-                      highest_bidder_id: updated.highest_bidder_id ?? item.highest_bidder_id,
-                      ends_at: updated.ends_at ?? item.ends_at,
-                      status: (updated.status as AuctionItem['status']) ?? item.status,
-                      extensions_count: Number(
-                        updated.extensions_count ?? item.extensions_count
-                      ),
-                    }
-                  : item
-              )
-            );
-          } else if (payload.eventType === 'INSERT') {
-            router.refresh();
-          }
+          const updated = payload.new as Partial<AuctionItem> & { id?: string };
+          if (!updated.id) return;
+          setAuctions((prev) =>
+            prev.map((item) =>
+              item.id === updated.id
+                ? {
+                    ...item,
+                    current_price: Number(updated.current_price ?? item.current_price),
+                    highest_bidder_id: updated.highest_bidder_id ?? item.highest_bidder_id,
+                    ends_at: updated.ends_at ?? item.ends_at,
+                    status: (updated.status as AuctionItem['status']) ?? item.status,
+                    extensions_count: Number(
+                      updated.extensions_count ?? item.extensions_count
+                    ),
+                  }
+                : item
+            )
+          );
         }
       )
       .subscribe();
@@ -69,22 +67,26 @@ export function SellerHomeView({
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [router]);
+  }, []);
 
-  function handleSearchSubmit(e: FormEvent) {
-    e.preventDefault();
-    const q = searchQuery.trim();
-    router.push(q ? `/search?q=${encodeURIComponent(q)}` : '/search');
-  }
-
-  function handleToggleSave(auctionId: string, nextSaved: boolean) {
+  const handleToggleSave = useCallback((auctionId: string, nextSaved: boolean) => {
     setSavedSet((prev) => {
       const next = new Set(prev);
       if (nextSaved) next.add(auctionId);
       else next.delete(auctionId);
       return next;
     });
-  }
+  }, []);
+
+  const handleCategoryPick = useCallback((categoryId: string) => {
+    setSelectedCategory(categoryId);
+    const searchEl = document.getElementById('unified-auction-search');
+    searchEl?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, []);
+
+  const handleCategoryReset = useCallback(() => {
+    setSelectedCategory(undefined);
+  }, []);
 
   const { myListings, totalBidsOnMine, featured, trending, categoryCounts } = useMemo(() => {
     const now = Date.now();
@@ -115,11 +117,11 @@ export function SellerHomeView({
       <MarketplaceNavbar user={user} />
 
       <main className="mx-auto max-w-7xl space-y-10 px-4 py-7 sm:px-6 lg:px-8 lg:py-9">
-        {/* Personalized Seller Welcome Section */}
-        <section className="smoky-glass-card rounded-[34px] border border-white/20 p-6 backdrop-blur-2xl sm:p-8">
+        {/* Personalized Seller Welcome Section & Single Unified Search */}
+        <section className="smoky-glass-card rounded-[34px] border border-white/20 p-6 sm:p-8">
           <div className="relative z-10 flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
             <div className="max-w-2xl">
-              <div className="inline-flex items-center gap-1.5 rounded-full border border-white/25 bg-[#e2e4e8]/15 px-3 py-1 text-[11px] font-medium text-white backdrop-blur-md">
+              <div className="inline-flex items-center gap-1.5 rounded-full border border-white/25 bg-[#e2e4e8]/15 px-3 py-1 text-[11px] font-medium text-white">
                 <Store className="h-3.5 w-3.5 text-[#e2e4e8]" aria-hidden="true" />
                 <span>Seller Studio &bull; Protected Anti-Sniping Auctions</span>
               </div>
@@ -135,7 +137,7 @@ export function SellerHomeView({
 
             <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center">
               <div className="flex items-center gap-3">
-                <div className="rounded-2xl border border-white/15 bg-white/[0.04] px-4 py-2.5 text-center backdrop-blur-md">
+                <div className="rounded-2xl border border-white/15 bg-white/[0.04] px-4 py-2.5 text-center">
                   <p className="text-[10px] font-medium uppercase tracking-wider text-white/55">
                     Your Listings
                   </p>
@@ -143,7 +145,7 @@ export function SellerHomeView({
                     {myListings.length}
                   </p>
                 </div>
-                <div className="rounded-2xl border border-white/15 bg-white/[0.04] px-4 py-2.5 text-center backdrop-blur-md">
+                <div className="rounded-2xl border border-white/15 bg-white/[0.04] px-4 py-2.5 text-center">
                   <p className="text-[10px] font-medium uppercase tracking-wider text-white/55">
                     Bids Received
                   </p>
@@ -169,29 +171,18 @@ export function SellerHomeView({
             </div>
           </div>
 
-          {/* Search Bar */}
-          <form onSubmit={handleSearchSubmit} className="relative z-10 mt-6">
-            <div className="flex flex-col gap-2.5 sm:flex-row">
-              <div className="flex h-12 flex-1 items-center gap-3 rounded-full border border-white/20 bg-white/[0.05] px-4 backdrop-blur-md transition focus-within:border-white/50 focus-within:bg-white/[0.09] focus-within:ring-2 focus-within:ring-white/15">
-                <Search className="h-4 w-4 shrink-0 text-white/55" aria-hidden="true" />
-                <input
-                  type="search"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search marketplace prices, categories, or active auctions..."
-                  aria-label="Search auctions"
-                  className="h-full min-w-0 flex-1 bg-transparent text-sm text-white placeholder:text-white/45 focus:outline-none"
-                />
-              </div>
-
-              <button
-                type="submit"
-                className="smoky-cta-btn flex h-12 shrink-0 cursor-pointer items-center justify-center rounded-full px-7 text-sm font-medium text-white transition focus:outline-none focus-visible:ring-2 focus-visible:ring-white/45"
-              >
-                Search Market
-              </button>
-            </div>
-          </form>
+          <div className="relative z-10 mt-6">
+            <UnifiedSearchBar
+              auctions={auctions}
+              savedSet={savedSet}
+              onToggleSave={handleToggleSave}
+              viewerRole="seller"
+              viewerId={user.id}
+              placeholder="Search marketplace prices, categories, or active auctions..."
+              externalCategory={selectedCategory}
+              onExternalCategoryReset={handleCategoryReset}
+            />
+          </div>
         </section>
 
         {/* Seller's Own Listings */}
@@ -206,6 +197,7 @@ export function SellerHomeView({
 
             <Link
               href="/seller/create-listing"
+              prefetch
               className="rounded-full border border-white/20 bg-white/[0.05] px-3.5 py-1.5 text-xs font-medium text-white transition hover:border-white/40 hover:bg-white/10"
             >
               + New Listing
@@ -226,7 +218,7 @@ export function SellerHomeView({
               ))}
             </div>
           ) : (
-            <div className="rounded-[28px] border border-white/15 bg-white/[0.03] px-6 py-10 text-center backdrop-blur-xl">
+            <div className="rounded-[28px] border border-white/15 bg-[#0e1015]/80 px-6 py-10 text-center">
               <PackagePlus className="mx-auto h-7 w-7 text-white/45" aria-hidden="true" />
               <p className="mt-3 text-sm font-medium text-white">
                 You haven&apos;t published any auctions yet
@@ -236,6 +228,7 @@ export function SellerHomeView({
               </p>
               <Link
                 href="/seller/create-listing"
+                prefetch
                 className="smoky-cta-btn mt-5 inline-flex h-10 items-center justify-center rounded-full px-6 text-xs font-medium text-white"
               >
                 + Create First Auction
@@ -267,7 +260,7 @@ export function SellerHomeView({
               ))}
             </div>
           ) : (
-            <div className="rounded-[28px] border border-white/15 bg-white/[0.03] px-6 py-8 text-center text-xs text-white/60">
+            <div className="rounded-[28px] border border-white/15 bg-[#0e1015]/80 px-6 py-8 text-center text-xs text-white/60">
               No marketplace auctions listed yet.
             </div>
           )}
@@ -303,7 +296,10 @@ export function SellerHomeView({
           <h2 id="seller-categories-heading" className="text-lg font-semibold tracking-tight">
             Auction Categories
           </h2>
-          <CategoryGrid countsByCategory={categoryCounts} />
+          <CategoryGrid
+            countsByCategory={categoryCounts}
+            onSelectCategory={handleCategoryPick}
+          />
         </section>
       </main>
     </div>

@@ -2,7 +2,7 @@
 
 import { ArrowUpRight, Bookmark, Gavel } from 'lucide-react';
 import Link from 'next/link';
-import { useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import { CountdownTimer } from '@/components/marketplace/CountdownTimer';
 import {
   type AuctionItem,
@@ -19,15 +19,21 @@ interface AuctionCardProps {
   viewerId?: string;
 }
 
-export function AuctionCard({
+export const AuctionCard = memo(function AuctionCard({
   auction,
   isSaved,
   onToggleSave,
   viewerRole,
   viewerId,
 }: AuctionCardProps) {
+  const inFlightRef = useRef(false);
   const [saving, setSaving] = useState(false);
   const [localSaved, setLocalSaved] = useState(isSaved);
+
+  useEffect(() => {
+    setLocalSaved(isSaved);
+  }, [isSaved]);
+
   const phase = getAuctionPhase(auction);
   const imageUrl = getPrimaryImage(auction);
   const isOwnListing = viewerId === auction.seller_id;
@@ -35,8 +41,14 @@ export function AuctionCard({
   async function handleSaveToggle(e: React.MouseEvent) {
     e.preventDefault();
     e.stopPropagation();
-    if (saving) return;
+    if (inFlightRef.current || saving) return;
+    inFlightRef.current = true;
     setSaving(true);
+
+    // Optimistic toggle for immediate tactile response
+    const previous = localSaved;
+    setLocalSaved(!previous);
+
     try {
       const res = await fetch('/api/saved', {
         method: 'POST',
@@ -47,14 +59,19 @@ export function AuctionCard({
         const data = (await res.json()) as { saved: boolean };
         setLocalSaved(data.saved);
         onToggleSave?.(auction.id, data.saved);
+      } else {
+        setLocalSaved(previous);
       }
+    } catch {
+      setLocalSaved(previous);
     } finally {
+      inFlightRef.current = false;
       setSaving(false);
     }
   }
 
   return (
-    <article className="group relative flex flex-col overflow-hidden rounded-[28px] border border-white/18 bg-white/[0.04] backdrop-blur-xl transition-all duration-300 hover:border-white/35 hover:bg-white/[0.065] hover:shadow-[0_20px_50px_rgba(0,0,0,0.55)]">
+    <article className="group relative flex flex-col overflow-hidden rounded-[28px] border border-white/18 bg-[#0e1015]/90 transition-[border-color,background-color,box-shadow] duration-200 hover:border-white/35 hover:bg-[#13161d]/95 hover:shadow-[0_18px_42px_rgba(0,0,0,0.55)]">
       {/* Image Header */}
       <div className="relative aspect-[16/10] w-full overflow-hidden border-b border-white/10 bg-[#0b0c10]">
         {imageUrl ? (
@@ -62,7 +79,9 @@ export function AuctionCard({
           <img
             src={imageUrl}
             alt={auction.title}
-            className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.03]"
+            loading="lazy"
+            decoding="async"
+            className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.02]"
           />
         ) : (
           <div className="flex h-full w-full items-center justify-center bg-gradient-to-b from-[#171a21] to-[#08090c]">
@@ -70,6 +89,10 @@ export function AuctionCard({
             <img
               src="/snipe-shield-logo.webp"
               alt="Snipe Shield"
+              width={64}
+              height={64}
+              loading="lazy"
+              decoding="async"
               className="h-16 w-16 object-contain opacity-65"
             />
           </div>
@@ -79,12 +102,12 @@ export function AuctionCard({
         <div className="absolute inset-x-3 top-3 flex items-center justify-between gap-2">
           <div className="flex items-center gap-1.5">
             <span
-              className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider backdrop-blur-md ${
+              className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${
                 phase === 'live'
-                  ? 'border-emerald-300/35 bg-emerald-950/70 text-emerald-200'
+                  ? 'border-emerald-300/35 bg-emerald-950/85 text-emerald-200'
                   : phase === 'upcoming'
-                    ? 'border-white/25 bg-black/60 text-white/85'
-                    : 'border-white/15 bg-black/70 text-white/55'
+                    ? 'border-white/25 bg-black/75 text-white/85'
+                    : 'border-white/15 bg-black/80 text-white/55'
               }`}
             >
               {phase === 'live' ? (
@@ -93,7 +116,7 @@ export function AuctionCard({
               {phase === 'live' ? 'Live' : phase === 'upcoming' ? 'Upcoming' : 'Ended'}
             </span>
 
-            <span className="rounded-full border border-white/20 bg-black/60 px-2.5 py-0.5 text-[10px] font-medium text-white/80 backdrop-blur-md">
+            <span className="rounded-full border border-white/20 bg-black/75 px-2.5 py-0.5 text-[10px] font-medium text-white/80">
               {auction.condition}
             </span>
           </div>
@@ -103,10 +126,10 @@ export function AuctionCard({
             onClick={handleSaveToggle}
             disabled={saving}
             aria-label={localSaved ? 'Remove from saved items' : 'Save auction item'}
-            className={`flex h-8 w-8 cursor-pointer items-center justify-center rounded-full border backdrop-blur-md transition focus:outline-none focus-visible:ring-2 focus-visible:ring-white/45 ${
+            className={`flex h-8 w-8 cursor-pointer items-center justify-center rounded-full border transition focus:outline-none focus-visible:ring-2 focus-visible:ring-white/45 ${
               localSaved
                 ? 'border-white/50 bg-[#e2e4e8] text-neutral-950'
-                : 'border-white/20 bg-black/55 text-white/80 hover:border-white/40 hover:text-white'
+                : 'border-white/20 bg-black/70 text-white/80 hover:border-white/40 hover:text-white'
             }`}
           >
             <Bookmark
@@ -125,7 +148,7 @@ export function AuctionCard({
             <span>{auction.bid_count ?? 0} bids</span>
           </div>
 
-          <Link href={`/auctions/${auction.id}`} className="mt-1.5 block">
+          <Link href={`/auctions/${auction.id}`} prefetch className="mt-1.5 block">
             <h3 className="line-clamp-1 text-base font-semibold tracking-tight text-white transition group-hover:text-[#e2e4e8]">
               {auction.title}
             </h3>
@@ -164,6 +187,7 @@ export function AuctionCard({
 
           <Link
             href={`/auctions/${auction.id}`}
+            prefetch
             className="smoky-cta-btn flex h-10 w-full items-center justify-center gap-1.5 rounded-full text-xs font-medium text-white transition focus:outline-none focus-visible:ring-2 focus-visible:ring-white/45"
           >
             {viewerRole === 'bidder' && !isOwnListing && phase === 'live' ? (
@@ -182,4 +206,4 @@ export function AuctionCard({
       </div>
     </article>
   );
-}
+});

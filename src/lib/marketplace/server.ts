@@ -1,11 +1,16 @@
 import { redirect } from 'next/navigation';
+import { cache } from 'react';
 import { normalizeRole, type UserRole } from '@/lib/auth/validation';
 import { getSupabaseServerClient } from '@/lib/supabase/server';
 import type { AuctionItem, BidEntry, MarketplaceUser } from './types';
 
 type ServerSupabase = NonNullable<Awaited<ReturnType<typeof getSupabaseServerClient>>>;
 
-function deriveDisplayName(fullName?: string | null, email?: string | null, phone?: string | null): string {
+function deriveDisplayName(
+  fullName?: string | null,
+  email?: string | null,
+  phone?: string | null
+): string {
   const clean = (fullName ?? '').trim();
   if (clean) return clean;
   if (email && email.includes('@')) {
@@ -15,10 +20,10 @@ function deriveDisplayName(fullName?: string | null, email?: string | null, phon
   return 'Snipe Shield User';
 }
 
-export async function requireAuthenticatedUser(): Promise<{
+export const requireAuthenticatedUser = cache(async (): Promise<{
   supabase: ServerSupabase;
   user: MarketplaceUser;
-}> {
+}> => {
   const supabase = await getSupabaseServerClient();
   if (!supabase) {
     redirect('/login?notice=demo');
@@ -56,7 +61,7 @@ export async function requireAuthenticatedUser(): Promise<{
       avatarUrl: profile?.avatar_url ?? null,
     },
   };
-}
+});
 
 export async function requireRole(expectedRole: UserRole): Promise<{
   supabase: ServerSupabase;
@@ -89,6 +94,25 @@ async function fetchPublicDisplayMap(
   return map;
 }
 
+async function fetchBidCountsMap(
+  supabase: ServerSupabase,
+  auctionIds: string[]
+): Promise<Map<string, number>> {
+  const counts = new Map<string, number>();
+  if (auctionIds.length === 0) return counts;
+
+  const { data } = await supabase.rpc('get_auction_bid_counts', {
+    p_auction_ids: auctionIds,
+  });
+
+  if (Array.isArray(data)) {
+    for (const row of data as Array<{ auction_id: string; bid_count: number }>) {
+      counts.set(row.auction_id, Number(row.bid_count ?? 0));
+    }
+  }
+  return counts;
+}
+
 export async function fetchMarketplaceCatalog(
   supabase: ServerSupabase,
   userId: string
@@ -96,7 +120,7 @@ export async function fetchMarketplaceCatalog(
   auctions: AuctionItem[];
   savedIds: string[];
 }> {
-  const [{ data: rawAuctions }, { data: rawSaved }, { data: rawBids }] = await Promise.all([
+  const [{ data: rawAuctions }, { data: rawSaved }] = await Promise.all([
     supabase
       .from('auctions')
       .select(
@@ -104,26 +128,24 @@ export async function fetchMarketplaceCatalog(
       )
       .in('status', ['active', 'ended'])
       .order('created_at', { ascending: false })
-      .limit(80),
+      .limit(60),
     supabase.from('saved_items').select('auction_id').eq('user_id', userId),
-    supabase.from('bids').select('auction_id'),
   ]);
 
-  const bidCounts = new Map<string, number>();
-  if (Array.isArray(rawBids)) {
-    for (const row of rawBids) {
-      bidCounts.set(row.auction_id, (bidCounts.get(row.auction_id) ?? 0) + 1);
-    }
-  }
-
+  const rows = rawAuctions ?? [];
+  const auctionIds = rows.map((r) => r.id);
   const profileIds: string[] = [];
-  for (const row of rawAuctions ?? []) {
+  for (const row of rows) {
     if (row.seller_id) profileIds.push(row.seller_id);
     if (row.highest_bidder_id) profileIds.push(row.highest_bidder_id);
   }
-  const nameMap = await fetchPublicDisplayMap(supabase, profileIds);
 
-  const auctions: AuctionItem[] = (rawAuctions ?? []).map((row) => ({
+  const [bidCounts, nameMap] = await Promise.all([
+    fetchBidCountsMap(supabase, auctionIds),
+    fetchPublicDisplayMap(supabase, profileIds),
+  ]);
+
+  const auctions: AuctionItem[] = rows.map((row) => ({
     id: row.id,
     seller_id: row.seller_id,
     seller_name: nameMap.get(row.seller_id) ?? 'Verified Seller',
@@ -154,6 +176,66 @@ export async function fetchMarketplaceCatalog(
   return { auctions, savedIds };
 }
 
+export async function fetchSavedAuctions(
+  supabase: ServerSupabase,
+  userId: string
+): Promise<AuctionItem[]> {
+  const { data: savedRows } = await supabase
+    .from('saved_items')
+    .select('auction_id')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false });
+
+  const savedIds = (savedRows ?? []).map((s) => s.auction_id);
+  if (savedIds.length === 0) return [];
+
+  const { data: rawAuctions } = await supabase
+    .from('auctions')
+    .select(
+      'id, seller_id, title, description, category, condition, image_url, image_urls, starting_price, current_price, min_increment, highest_bidder_id, status, starts_at, ends_at, extensions_count, created_at'
+    )
+    .in('id', savedIds);
+
+  const rows = rawAuctions ?? [];
+  const profileIds = rows.flatMap((r) =>
+    [r.seller_id, r.highest_bidder_id].filter((v): v is string => Boolean(v))
+  );
+
+  const [bidCounts, nameMap] = await Promise.all([
+    fetchBidCountsMap(
+      supabase,
+      rows.map((r) => r.id)
+    ),
+    fetchPublicDisplayMap(supabase, profileIds),
+  ]);
+
+  return rows.map((row) => ({
+    id: row.id,
+    seller_id: row.seller_id,
+    seller_name: nameMap.get(row.seller_id) ?? 'Verified Seller',
+    title: row.title,
+    description: row.description ?? '',
+    category: row.category ?? 'Electronics',
+    condition: row.condition ?? 'New',
+    image_url: row.image_url ?? null,
+    image_urls: Array.isArray(row.image_urls) ? row.image_urls : [],
+    starting_price: Number(row.starting_price),
+    current_price: Number(row.current_price),
+    min_increment: Number(row.min_increment ?? 100),
+    reserve_price: null,
+    highest_bidder_id: row.highest_bidder_id ?? null,
+    highest_bidder_name: row.highest_bidder_id
+      ? nameMap.get(row.highest_bidder_id) ?? 'Bidder'
+      : null,
+    status: row.status,
+    starts_at: row.starts_at,
+    ends_at: row.ends_at,
+    extensions_count: Number(row.extensions_count ?? 0),
+    created_at: row.created_at,
+    bid_count: bidCounts.get(row.id) ?? 0,
+  }));
+}
+
 export async function fetchAuctionDetail(
   supabase: ServerSupabase,
   auctionId: string,
@@ -164,38 +246,38 @@ export async function fetchAuctionDetail(
   isSaved: boolean;
   myProxyMax: number | null;
 }> {
-  const { data: row } = await supabase
-    .from('auctions')
-    .select(
-      'id, seller_id, title, description, category, condition, image_url, image_urls, starting_price, current_price, min_increment, reserve_price, highest_bidder_id, status, starts_at, ends_at, extensions_count, created_at'
-    )
-    .eq('id', auctionId)
-    .maybeSingle();
+  const [{ data: row }, { data: rawBids }, { data: savedRow }, { data: proxyRow }] =
+    await Promise.all([
+      supabase
+        .from('auctions')
+        .select(
+          'id, seller_id, title, description, category, condition, image_url, image_urls, starting_price, current_price, min_increment, reserve_price, highest_bidder_id, status, starts_at, ends_at, extensions_count, created_at'
+        )
+        .eq('id', auctionId)
+        .maybeSingle(),
+      supabase
+        .from('bids')
+        .select('id, auction_id, bidder_id, amount, is_auto_proxy, created_at')
+        .eq('auction_id', auctionId)
+        .order('created_at', { ascending: false })
+        .limit(40),
+      supabase
+        .from('saved_items')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('auction_id', auctionId)
+        .maybeSingle(),
+      supabase
+        .from('proxy_bids')
+        .select('max_amount')
+        .eq('auction_id', auctionId)
+        .eq('bidder_id', userId)
+        .maybeSingle(),
+    ]);
 
   if (!row) {
     return { auction: null, bids: [], isSaved: false, myProxyMax: null };
   }
-
-  const [{ data: rawBids }, { data: savedRow }, { data: proxyRow }] = await Promise.all([
-    supabase
-      .from('bids')
-      .select('id, auction_id, bidder_id, amount, is_auto_proxy, created_at')
-      .eq('auction_id', auctionId)
-      .order('created_at', { ascending: false })
-      .limit(40),
-    supabase
-      .from('saved_items')
-      .select('id')
-      .eq('user_id', userId)
-      .eq('auction_id', auctionId)
-      .maybeSingle(),
-    supabase
-      .from('proxy_bids')
-      .select('max_amount')
-      .eq('auction_id', auctionId)
-      .eq('bidder_id', userId)
-      .maybeSingle(),
-  ]);
 
   const ids: string[] = [row.seller_id];
   if (row.highest_bidder_id) ids.push(row.highest_bidder_id);
@@ -204,7 +286,6 @@ export async function fetchAuctionDetail(
   }
   const nameMap = await fetchPublicDisplayMap(supabase, ids);
 
-  // Never expose reserve_price to non-sellers
   const safeReservePrice =
     row.seller_id === userId && row.reserve_price !== null ? Number(row.reserve_price) : null;
 

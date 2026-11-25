@@ -2,7 +2,7 @@
 
 import { Bookmark } from 'lucide-react';
 import Link from 'next/link';
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { AuctionCard } from '@/components/marketplace/AuctionCard';
 import { MarketplaceNavbar } from '@/components/marketplace/MarketplaceNavbar';
 import type { AuctionItem, MarketplaceUser } from '@/lib/marketplace/types';
@@ -19,11 +19,11 @@ export function SavedItemsClient({
   const [savedAuctions, setSavedAuctions] = useState<AuctionItem[]>(initialSavedAuctions);
   const homeHref = user.role === 'seller' ? '/seller/home' : '/bidder/home';
 
-  function handleToggleSave(auctionId: string, nextSaved: boolean) {
+  const handleToggleSave = useCallback((auctionId: string, nextSaved: boolean) => {
     if (!nextSaved) {
       setSavedAuctions((prev) => prev.filter((item) => item.id !== auctionId));
     }
-  }
+  }, []);
 
   return (
     <div className="smoky-ambient-page min-h-dvh text-white">

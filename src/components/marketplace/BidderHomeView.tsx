@@ -1,13 +1,12 @@
 'use client';
 
-import { Flame, Gavel, Search, ShieldCheck, Sparkles, Timer } from 'lucide-react';
-import { useRouter } from 'next/navigation';
-import { type FormEvent, useEffect, useMemo, useState } from 'react';
+import { Flame, Gavel, ShieldCheck, Sparkles, Timer } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AuctionCard } from '@/components/marketplace/AuctionCard';
 import { CategoryGrid } from '@/components/marketplace/CategoryGrid';
 import { MarketplaceNavbar } from '@/components/marketplace/MarketplaceNavbar';
+import { UnifiedSearchBar } from '@/components/marketplace/UnifiedSearchBar';
 import {
-  AUCTION_CATEGORIES,
   type AuctionItem,
   getAuctionPhase,
   type MarketplaceUser,
@@ -22,7 +21,7 @@ interface BidderHomeViewProps {
 
 function EmptySection({ message }: { message: string }) {
   return (
-    <div className="rounded-[28px] border border-white/15 bg-white/[0.03] px-6 py-10 text-center backdrop-blur-xl">
+    <div className="rounded-[28px] border border-white/15 bg-[#0e1015]/80 px-6 py-10 text-center">
       <Gavel className="mx-auto h-7 w-7 text-white/40" aria-hidden="true" />
       <p className="mt-3 text-sm font-medium text-white/80">{message}</p>
       <p className="mt-1 text-xs text-white/50">
@@ -37,10 +36,9 @@ export function BidderHomeView({
   initialAuctions,
   initialSavedIds,
 }: BidderHomeViewProps) {
-  const router = useRouter();
   const [auctions, setAuctions] = useState<AuctionItem[]>(initialAuctions);
   const [savedSet, setSavedSet] = useState<Set<string>>(() => new Set(initialSavedIds));
-  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState<string | undefined>(undefined);
 
   useEffect(() => {
     const supabase = getSupabaseBrowserClient();
@@ -50,29 +48,26 @@ export function BidderHomeView({
       .channel('bidder-home-auctions')
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'auctions' },
+        { event: 'UPDATE', schema: 'public', table: 'auctions' },
         (payload) => {
-          if (payload.eventType === 'UPDATE' && payload.new) {
-            const updated = payload.new as Partial<AuctionItem> & { id: string };
-            setAuctions((prev) =>
-              prev.map((item) =>
-                item.id === updated.id
-                  ? {
-                      ...item,
-                      current_price: Number(updated.current_price ?? item.current_price),
-                      highest_bidder_id: updated.highest_bidder_id ?? item.highest_bidder_id,
-                      ends_at: updated.ends_at ?? item.ends_at,
-                      status: (updated.status as AuctionItem['status']) ?? item.status,
-                      extensions_count: Number(
-                        updated.extensions_count ?? item.extensions_count
-                      ),
-                    }
-                  : item
-              )
-            );
-          } else if (payload.eventType === 'INSERT') {
-            router.refresh();
-          }
+          const updated = payload.new as Partial<AuctionItem> & { id?: string };
+          if (!updated.id) return;
+          setAuctions((prev) =>
+            prev.map((item) =>
+              item.id === updated.id
+                ? {
+                    ...item,
+                    current_price: Number(updated.current_price ?? item.current_price),
+                    highest_bidder_id: updated.highest_bidder_id ?? item.highest_bidder_id,
+                    ends_at: updated.ends_at ?? item.ends_at,
+                    status: (updated.status as AuctionItem['status']) ?? item.status,
+                    extensions_count: Number(
+                      updated.extensions_count ?? item.extensions_count
+                    ),
+                  }
+                : item
+            )
+          );
         }
       )
       .subscribe();
@@ -80,22 +75,26 @@ export function BidderHomeView({
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [router]);
+  }, []);
 
-  function handleSearchSubmit(e: FormEvent) {
-    e.preventDefault();
-    const q = searchQuery.trim();
-    router.push(q ? `/search?q=${encodeURIComponent(q)}` : '/search');
-  }
-
-  function handleToggleSave(auctionId: string, nextSaved: boolean) {
+  const handleToggleSave = useCallback((auctionId: string, nextSaved: boolean) => {
     setSavedSet((prev) => {
       const next = new Set(prev);
       if (nextSaved) next.add(auctionId);
       else next.delete(auctionId);
       return next;
     });
-  }
+  }, []);
+
+  const handleCategoryPick = useCallback((categoryId: string) => {
+    setSelectedCategory(categoryId);
+    const searchEl = document.getElementById('unified-auction-search');
+    searchEl?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, []);
+
+  const handleCategoryReset = useCallback(() => {
+    setSelectedCategory(undefined);
+  }, []);
 
   const { liveAuctions, featured, trending, recent, recommended, categoryCounts } =
     useMemo(() => {
@@ -134,11 +133,11 @@ export function BidderHomeView({
       <MarketplaceNavbar user={user} />
 
       <main className="mx-auto max-w-7xl space-y-10 px-4 py-7 sm:px-6 lg:px-8 lg:py-9">
-        {/* Welcome Hero & Prominent Search */}
-        <section className="smoky-glass-card rounded-[34px] border border-white/20 p-6 backdrop-blur-2xl sm:p-8">
+        {/* Welcome Hero & Single Unified Instant Search */}
+        <section className="smoky-glass-card rounded-[34px] border border-white/20 p-6 sm:p-8">
           <div className="relative z-10 flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
             <div className="max-w-2xl">
-              <div className="inline-flex items-center gap-1.5 rounded-full border border-white/20 bg-white/[0.06] px-3 py-1 text-[11px] font-medium text-white/85 backdrop-blur-md">
+              <div className="inline-flex items-center gap-1.5 rounded-full border border-white/20 bg-white/[0.06] px-3 py-1 text-[11px] font-medium text-white/85">
                 <ShieldCheck className="h-3.5 w-3.5 text-[#d5d7db]" aria-hidden="true" />
                 <span>30s Anti-Sniping &amp; Auto-Proxy Bidding Active</span>
               </div>
@@ -153,7 +152,7 @@ export function BidderHomeView({
             </div>
 
             <div className="flex shrink-0 items-center gap-3">
-              <div className="rounded-2xl border border-white/15 bg-white/[0.04] px-4 py-2.5 text-center backdrop-blur-md">
+              <div className="rounded-2xl border border-white/15 bg-white/[0.04] px-4 py-2.5 text-center">
                 <p className="text-[10px] font-medium uppercase tracking-wider text-white/55">
                   Live Drops
                 </p>
@@ -161,7 +160,7 @@ export function BidderHomeView({
                   {liveAuctions.length}
                 </p>
               </div>
-              <div className="rounded-2xl border border-white/15 bg-white/[0.04] px-4 py-2.5 text-center backdrop-blur-md">
+              <div className="rounded-2xl border border-white/15 bg-white/[0.04] px-4 py-2.5 text-center">
                 <p className="text-[10px] font-medium uppercase tracking-wider text-white/55">
                   Saved
                 </p>
@@ -170,43 +169,17 @@ export function BidderHomeView({
             </div>
           </div>
 
-          {/* Search Bar */}
-          <form onSubmit={handleSearchSubmit} className="relative z-10 mt-6">
-            <div className="flex flex-col gap-2.5 sm:flex-row">
-              <div className="flex h-12 flex-1 items-center gap-3 rounded-full border border-white/20 bg-white/[0.05] px-4 backdrop-blur-md transition focus-within:border-white/50 focus-within:bg-white/[0.09] focus-within:ring-2 focus-within:ring-white/15">
-                <Search className="h-4 w-4 shrink-0 text-white/55" aria-hidden="true" />
-                <input
-                  type="search"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search laptops, GPUs, flagship phones, cameras..."
-                  aria-label="Search auction items"
-                  className="h-full min-w-0 flex-1 bg-transparent text-sm text-white placeholder:text-white/45 focus:outline-none"
-                />
-              </div>
-
-              <button
-                type="submit"
-                className="smoky-cta-btn flex h-12 shrink-0 cursor-pointer items-center justify-center rounded-full px-7 text-sm font-medium text-white transition focus:outline-none focus-visible:ring-2 focus-visible:ring-white/45"
-              >
-                Search Auctions
-              </button>
-            </div>
-
-            {/* Quick Category Pills */}
-            <div className="mt-3.5 flex flex-wrap items-center gap-2">
-              {AUCTION_CATEGORIES.map((cat) => (
-                <button
-                  key={cat.id}
-                  type="button"
-                  onClick={() => router.push(`/search?category=${encodeURIComponent(cat.id)}`)}
-                  className="cursor-pointer rounded-full border border-white/15 bg-white/[0.04] px-3 py-1 text-[11px] font-medium text-white/75 transition hover:border-white/35 hover:bg-white/[0.1] hover:text-white"
-                >
-                  {cat.label}
-                </button>
-              ))}
-            </div>
-          </form>
+          <div className="relative z-10 mt-6">
+            <UnifiedSearchBar
+              auctions={auctions}
+              savedSet={savedSet}
+              onToggleSave={handleToggleSave}
+              viewerRole="bidder"
+              viewerId={user.id}
+              externalCategory={selectedCategory}
+              onExternalCategoryReset={handleCategoryReset}
+            />
+          </div>
         </section>
 
         {/* Featured Auctions */}
@@ -218,13 +191,6 @@ export function BidderHomeView({
                 Featured Auctions
               </h2>
             </div>
-            <button
-              type="button"
-              onClick={() => router.push('/search')}
-              className="cursor-pointer text-xs font-medium text-white/70 transition hover:text-white"
-            >
-              Explore all &rarr;
-            </button>
           </div>
 
           {featured.length > 0 ? (
@@ -277,7 +243,10 @@ export function BidderHomeView({
           <h2 id="bidder-categories-heading" className="text-lg font-semibold tracking-tight">
             Browse Categories
           </h2>
-          <CategoryGrid countsByCategory={categoryCounts} />
+          <CategoryGrid
+            countsByCategory={categoryCounts}
+            onSelectCategory={handleCategoryPick}
+          />
         </section>
 
         {/* Recently Added */}
