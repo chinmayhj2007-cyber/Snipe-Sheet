@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { LogoutButton } from '@/components/auth/LogoutButton';
 import { ShinyButton } from '@/components/ui/shiny-button';
 
@@ -9,24 +9,13 @@ interface DashboardWelcomeActionsProps {
 }
 
 export function DashboardWelcomeActions({ isSeller }: DashboardWelcomeActionsProps) {
-  const [showStatusNotice, setShowStatusNotice] = useState(false);
+  const router = useRouter();
 
   return (
     <div className="mt-5 space-y-3">
-      {showStatusNotice ? (
-        <div
-          role="status"
-          className="rounded-2xl border border-white/20 bg-white/[0.06] px-4 py-2.5 text-center text-xs leading-relaxed text-white/85 backdrop-blur-md"
-        >
-          {isSeller
-            ? 'Your Seller workspace is authenticated and ready. Live auction listing launches in Step 2.'
-            : 'Your Bidder session is authenticated and ready. Live bidding rooms & anti-sniping launch in Step 2.'}
-        </div>
-      ) : null}
-
       <ShinyButton
         label="START NOW"
-        onClick={() => setShowStatusNotice((prev) => !prev)}
+        onClick={() => router.push(isSeller ? '/seller/home' : '/bidder/home')}
         fillColor="#0b0c10"
         labelColor="#ffffff"
         accentColor="#a7adb6"
