@@ -16,13 +16,18 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized.' }, { status: 401 });
   }
 
-  let body: { fullName?: unknown };
+  let rawBody: unknown;
   try {
-    body = (await request.json()) as { fullName?: unknown };
+    rawBody = await request.json();
   } catch {
     return NextResponse.json({ error: 'Invalid request body.' }, { status: 400 });
   }
 
+  if (!rawBody || typeof rawBody !== 'object' || Array.isArray(rawBody)) {
+    return NextResponse.json({ error: 'Invalid request body.' }, { status: 400 });
+  }
+
+  const body = rawBody as { fullName?: unknown };
   const fullName = typeof body.fullName === 'string' ? body.fullName.trim() : '';
   if (fullName.length < 2 || fullName.length > 80) {
     return NextResponse.json(
@@ -31,13 +36,19 @@ export async function PATCH(request: NextRequest) {
     );
   }
 
-  const { error: updateError } = await supabase
+  const { data: updatedProfile, error: updateError } = await supabase
     .from('profiles')
     .update({ full_name: fullName })
-    .eq('id', user.id);
+    .eq('id', user.id)
+    .select('id')
+    .maybeSingle();
 
   if (updateError) {
     return NextResponse.json({ error: 'Unable to update profile right now.' }, { status: 500 });
+  }
+
+  if (!updatedProfile) {
+    return NextResponse.json({ error: 'Profile not found.' }, { status: 404 });
   }
 
   return NextResponse.json({ ok: true, fullName }, { status: 200 });

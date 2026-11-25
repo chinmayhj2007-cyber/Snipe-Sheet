@@ -41,6 +41,7 @@ export function TurnstileWidget({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const widgetIdRef = useRef<string | null>(null);
   const onTokenChangeRef = useRef(onTokenChange);
+  const prevResetSignalRef = useRef(resetSignal);
   const [scriptFailed, setScriptFailed] = useState(false);
   const widgetDomId = useId();
 
@@ -129,7 +130,11 @@ export function TurnstileWidget({
   }, [siteKey]);
 
   useEffect(() => {
-    if (resetSignal > 0 && widgetIdRef.current && window.turnstile) {
+    if (prevResetSignalRef.current === resetSignal) {
+      return;
+    }
+    prevResetSignalRef.current = resetSignal;
+    if (widgetIdRef.current && window.turnstile) {
       onTokenChangeRef.current(null);
       window.turnstile.reset(widgetIdRef.current);
     }
@@ -165,12 +170,12 @@ export function TurnstileWidget({
   }
 
   return (
-    <div className="w-full max-w-full">
+    <div className="w-full max-w-full overflow-x-auto rounded-2xl border border-white/15 bg-black/30 px-2 py-1.5 backdrop-blur-md">
       <div
         id={widgetDomId}
         ref={containerRef}
         aria-label="Security verification"
-        className="flex min-h-[65px] w-full max-w-full items-center justify-center overflow-hidden rounded-2xl border border-white/15 bg-black/30 p-0.5 backdrop-blur-md"
+        className="mx-auto flex min-h-[78px] min-w-fit items-center justify-center"
       />
     </div>
   );

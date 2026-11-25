@@ -13,6 +13,8 @@ function resolveNotice(code?: string): string | undefined {
       return 'That verification or reset link is invalid or has expired. Please request a new one.';
     case 'logged-out':
       return 'You have been logged out safely.';
+    case 'demo':
+      return 'Supabase is not connected yet. Add your credentials in .env.local to unlock protected pages.';
     default:
       return undefined;
   }

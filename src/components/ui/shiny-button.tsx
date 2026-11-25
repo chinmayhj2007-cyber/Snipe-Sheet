@@ -32,6 +32,8 @@ function usePrefersReducedMotion() {
 interface ShinyButtonProps {
   label?: string;
   onClick?: () => void;
+  type?: "button" | "submit" | "reset";
+  disabled?: boolean;
   className?: string;
   fillColor?: string;
   labelColor?: string;
@@ -49,6 +51,8 @@ interface ShinyButtonProps {
 export function ShinyButton({
   label = "Get Started",
   onClick,
+  type = "button",
+  disabled = false,
   className = "",
   fillColor = "#000000",
   labelColor = "#ffffff",
@@ -141,8 +145,20 @@ export function ShinyButton({
       z-index: -1;
     }
 
-    .${scope}:active {
+    .${scope}:active:not(:disabled) {
       translate: 0 1px;
+    }
+
+    .${scope}:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+
+    .${scope}:disabled,
+    .${scope}:disabled::before,
+    .${scope}:disabled::after,
+    .${scope}:disabled span::before {
+      animation-play-state: paused !important;
     }
 
     .${scope}::before {
@@ -272,7 +288,9 @@ export function ShinyButton({
     <>
       <style>{css}</style>
       <button
-        type="button"
+        type={type}
+        disabled={disabled}
+        aria-disabled={disabled || undefined}
         className={`${scope} ${className}`}
         onClick={onClick}
         aria-label={label}

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { GlassIconReveal } from '@/components/ui/liquid-glass-logo-reveal';
 
 const INTRO_SESSION_KEY = 'snipe_shield_intro_seen';
@@ -12,6 +12,34 @@ const FALLBACK_HOLD_MS = 1400;
 export function SnipeShieldIntro() {
   const [phase, setPhase] = useState<'init' | 'playing' | 'fading' | 'done'>('init');
   const [reducedMotion, setReducedMotion] = useState(false);
+  const holdTimerRef = useRef<number | null>(null);
+
+  const scheduleFinish = useCallback(
+    (delayMs: number) => {
+      if (holdTimerRef.current !== null) {
+        window.clearTimeout(holdTimerRef.current);
+      }
+      holdTimerRef.current = window.setTimeout(() => {
+        holdTimerRef.current = null;
+        setPhase((prev) => (prev === 'playing' || prev === 'init' ? 'fading' : prev));
+        try {
+          window.sessionStorage.setItem(INTRO_SESSION_KEY, '1');
+        } catch {
+          // Ignore storage restrictions
+        }
+      }, delayMs);
+    },
+    []
+  );
+
+  useEffect(() => {
+    return () => {
+      if (holdTimerRef.current !== null) {
+        window.clearTimeout(holdTimerRef.current);
+        holdTimerRef.current = null;
+      }
+    };
+  }, []);
 
   const finishIntro = useCallback(() => {
     try {
@@ -121,10 +149,10 @@ export function SnipeShieldIntro() {
                 specular: 1.05,
               }}
               onComplete={() => {
-                window.setTimeout(finishIntro, POST_REVEAL_HOLD_MS);
+                scheduleFinish(POST_REVEAL_HOLD_MS);
               }}
               onFallback={() => {
-                window.setTimeout(finishIntro, FALLBACK_HOLD_MS);
+                scheduleFinish(FALLBACK_HOLD_MS);
               }}
               className="h-full w-full cursor-default"
             />

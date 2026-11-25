@@ -17,6 +17,7 @@ export async function GET(request: NextRequest) {
   const code = requestUrl.searchParams.get('code');
   const tokenHash = requestUrl.searchParams.get('token_hash');
   const type = requestUrl.searchParams.get('type');
+  const flow = requestUrl.searchParams.get('flow');
   const oauthError = requestUrl.searchParams.get('error');
   const requestedRole = requestUrl.searchParams.get('role');
 
@@ -51,34 +52,47 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(invalidRedirect);
   }
 
-  // Ensure the profile row exists and respects any initial role chosen on /signup
+  const isRecovery = type === 'recovery' || flow === 'recovery';
+
+  // Ensure the profile row exists on initial signup/OAuth without ever overwriting existing roles
   const {
     data: { user },
+    error: userError,
   } = await supabase.auth.getUser();
 
-  if (user) {
-    const { data: existingProfile } = await supabase
-      .from('profiles')
-      .select('id, role')
-      .eq('id', user.id)
-      .maybeSingle();
+  if (userError || !user) {
+    return NextResponse.redirect(invalidRedirect);
+  }
 
+  const { data: existingProfile, error: profileError } = await supabase
+    .from('profiles')
+    .select('id, role')
+    .eq('id', user.id)
+    .maybeSingle();
+
+  if (profileError) {
+    console.error('Auth callback profile lookup error:', profileError.message);
+  } else if (!existingProfile) {
     const resolvedRole = requestedRole
       ? normalizeRole(requestedRole)
       : normalizeRole(user.user_metadata?.role);
 
-    if (!existingProfile) {
-      await supabase.from('profiles').insert({
-        id: user.id,
-        email: user.email ?? '',
-        role: resolvedRole,
-      });
-    } else if (requestedRole && existingProfile.role !== resolvedRole) {
-      await supabase
-        .from('profiles')
-        .update({ role: resolvedRole })
-        .eq('id', user.id);
+    const { error: insertError } = await supabase.from('profiles').insert({
+      id: user.id,
+      email: user.email ?? user.phone ?? '',
+      phone: user.phone ?? '',
+      role: resolvedRole,
+    });
+
+    if (insertError && insertError.code !== '23505') {
+      console.error('Auth callback profile insert error:', insertError.message);
     }
+  }
+
+  if (isRecovery) {
+    const recoveryRedirect = new URL('/reset-password', requestUrl.origin);
+    recoveryRedirect.searchParams.set('mode', 'update');
+    return NextResponse.redirect(recoveryRedirect);
   }
 
   const dashboardRedirect = new URL('/dashboard', requestUrl.origin);

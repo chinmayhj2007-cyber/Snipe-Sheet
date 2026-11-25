@@ -3,6 +3,20 @@ import { getSupabaseServerClient } from '@/lib/supabase/server';
 
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const MAX_BID_AMOUNT = 1000000000;
+
+function parseStrictFiniteNumber(value: unknown): number | null {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : null;
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    const num = Number(trimmed);
+    return Number.isFinite(num) ? num : null;
+  }
+  return null;
+}
 
 export async function POST(
   request: NextRequest,
@@ -27,37 +41,56 @@ export async function POST(
     return NextResponse.json({ error: 'Unauthorized.' }, { status: 401 });
   }
 
-  let body: { amount?: unknown; maxProxy?: unknown };
+  let rawBody: unknown;
   try {
-    body = (await request.json()) as { amount?: unknown; maxProxy?: unknown };
+    rawBody = await request.json();
   } catch {
     return NextResponse.json({ error: 'Invalid bid payload.' }, { status: 400 });
   }
 
-  const amount = Number(body.amount);
-  const maxProxy =
-    body.maxProxy === undefined || body.maxProxy === null || body.maxProxy === ''
-      ? null
-      : Number(body.maxProxy);
+  if (!rawBody || typeof rawBody !== 'object' || Array.isArray(rawBody)) {
+    return NextResponse.json({ error: 'Invalid bid payload.' }, { status: 400 });
+  }
 
-  if (!Number.isFinite(amount) || amount <= 0) {
+  const body = rawBody as { amount?: unknown; maxProxy?: unknown; idempotencyKey?: unknown };
+  const amount = parseStrictFiniteNumber(body.amount);
+  const hasMaxProxy =
+    body.maxProxy !== undefined && body.maxProxy !== null && body.maxProxy !== '';
+  const maxProxy = hasMaxProxy ? parseStrictFiniteNumber(body.maxProxy) : null;
+  const headerKey = request.headers.get('x-idempotency-key');
+  const idempotencyKey =
+    typeof body.idempotencyKey === 'string' && body.idempotencyKey.trim()
+      ? body.idempotencyKey.trim().slice(0, 100)
+      : headerKey?.trim().slice(0, 100) || null;
+
+  if (amount === null || amount <= 0 || amount > MAX_BID_AMOUNT) {
     return NextResponse.json({ error: 'Please enter a valid bid amount.' }, { status: 400 });
   }
 
-  if (maxProxy !== null && (!Number.isFinite(maxProxy) || maxProxy < amount)) {
+  if (
+    hasMaxProxy &&
+    (maxProxy === null || maxProxy < amount || maxProxy > MAX_BID_AMOUNT)
+  ) {
     return NextResponse.json(
-      { error: 'Auto-proxy max bid ceiling must be at least your bid amount.' },
+      {
+        error:
+          'Auto-proxy max bid ceiling must be between your bid amount and ₹1,00,00,00,000.',
+      },
       { status: 400 }
     );
   }
 
-  const { data, error } = await supabase.rpc('place_bid', {
+  const { data, error } = await supabase.rpc('place_bid_v2', {
     p_auction_id: auctionId,
     p_amount: Number(amount.toFixed(2)),
     p_max_proxy: maxProxy !== null ? Number(maxProxy.toFixed(2)) : null,
+    p_idempotency_key: idempotencyKey,
   });
 
   if (error) {
+    if (error.message.includes('Auction not found')) {
+      return NextResponse.json({ error: 'Auction not found.' }, { status: 404 });
+    }
     const safeMsg =
       error.message.includes('Only Bidder') ||
       error.message.includes('Sellers cannot bid') ||
@@ -65,7 +98,9 @@ export async function POST(
       error.message.includes('already ended') ||
       error.message.includes('not started') ||
       error.message.includes('not active') ||
-      error.message.includes('Auto-proxy')
+      error.message.includes('Auto-proxy') ||
+      error.message.includes('suspended') ||
+      error.message.includes('already the highest bidder')
         ? error.message
         : 'Unable to place bid right now. Please try again.';
     return NextResponse.json({ error: safeMsg }, { status: 400 });

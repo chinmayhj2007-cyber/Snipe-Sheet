@@ -2,25 +2,46 @@
 
 import { CheckCircle2, Loader2 } from 'lucide-react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { type FormEvent, useRef, useState } from 'react';
 import { FrostedInput } from '@/components/auth/FrostedInput';
-import { DEMO_MODE_MESSAGE, isRateLimitError, mapAuthError } from '@/lib/auth/errors';
-import { validateEmail } from '@/lib/auth/validation';
+import { PasswordStrengthMeter } from '@/components/auth/PasswordStrengthMeter';
+import {
+  DEMO_MODE_MESSAGE,
+  isRateLimitError,
+  mapAuthError,
+  RATE_LIMIT_MESSAGE,
+} from '@/lib/auth/errors';
+import {
+  MIN_PASSWORD_LENGTH,
+  validateEmail,
+  validatePassword,
+} from '@/lib/auth/validation';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 
 interface ResetPasswordFormProps {
   isDemoMode: boolean;
+  initialMode?: 'request' | 'update';
+  initialNotice?: string;
 }
 
-export function ResetPasswordForm({ isDemoMode }: ResetPasswordFormProps) {
+export function ResetPasswordForm({
+  isDemoMode,
+  initialMode = 'request',
+  initialNotice,
+}: ResetPasswordFormProps) {
+  const router = useRouter();
   const inFlightRef = useRef(false);
 
   const [email, setEmail] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(initialNotice ?? null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [sentEmail, setSentEmail] = useState<string | null>(null);
 
-  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
+  async function handleRequestSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (inFlightRef.current || isLoading) return;
 
@@ -42,7 +63,7 @@ export function ResetPasswordForm({ isDemoMode }: ResetPasswordFormProps) {
     setIsLoading(true);
 
     try {
-      const redirectTo = `${window.location.origin}/auth/callback`;
+      const redirectTo = `${window.location.origin}/auth/callback?flow=recovery`;
       const { error } = await supabase.auth.resetPasswordForEmail(
         emailCheck.email,
         { redirectTo }
@@ -56,15 +77,146 @@ export function ResetPasswordForm({ isDemoMode }: ResetPasswordFormProps) {
       // Never reveal whether an email exists in the system.
       setSentEmail(emailCheck.email);
     } catch (err) {
+      setErrorMessage(mapAuthError(err, 'reset'));
+    } finally {
+      inFlightRef.current = false;
+      setIsLoading(false);
+    }
+  }
+
+  async function handleUpdateSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (inFlightRef.current || isLoading) return;
+
+    setErrorMessage(null);
+    setSuccessMessage(null);
+
+    const passwordCheck = validatePassword(newPassword, { enforceLength: true });
+    if (!passwordCheck.valid) {
+      setErrorMessage(passwordCheck.message);
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      setErrorMessage('Passwords do not match.');
+      return;
+    }
+
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase || isDemoMode) {
+      setErrorMessage(DEMO_MODE_MESSAGE);
+      return;
+    }
+
+    inFlightRef.current = true;
+    setIsLoading(true);
+
+    try {
+      const { error } = await supabase.auth.updateUser({
+        password: newPassword,
+      });
+
+      if (error) {
+        if (isRateLimitError(error)) {
+          setErrorMessage(RATE_LIMIT_MESSAGE);
+          return;
+        }
+        const msg = error.message.toLowerCase();
+        if (msg.includes('different from the old password') || msg.includes('same password')) {
+          setErrorMessage('New password must be different from your current password.');
+        } else if (msg.includes('weak') || msg.includes('at least')) {
+          setErrorMessage(`Password must be at least ${MIN_PASSWORD_LENGTH} characters long.`);
+        } else {
+          setErrorMessage(
+            'Unable to update your password. Your recovery session may have expired — please request a new reset link.'
+          );
+        }
+        return;
+      }
+
+      setNewPassword('');
+      setConfirmPassword('');
+      setSuccessMessage('Password updated! Redirecting to your dashboard...');
+      router.replace('/dashboard?notice=password-updated');
+      router.refresh();
+    } catch (err) {
       if (isRateLimitError(err)) {
-        setErrorMessage(mapAuthError(err, 'reset'));
+        setErrorMessage(RATE_LIMIT_MESSAGE);
       } else {
-        setErrorMessage(mapAuthError(err, 'reset'));
+        setErrorMessage('Unable to update password right now. Please try again.');
       }
     } finally {
       inFlightRef.current = false;
       setIsLoading(false);
     }
+  }
+
+  if (initialMode === 'update') {
+    return (
+      <form onSubmit={handleUpdateSubmit} noValidate className="my-auto flex flex-col py-2">
+        <div className="space-y-3.5">
+          <div>
+            <FrostedInput
+              label="New password"
+              name="newPassword"
+              type="password"
+              value={newPassword}
+              onChange={setNewPassword}
+              placeholder="At least 8 characters"
+              autoComplete="new-password"
+              minLength={MIN_PASSWORD_LENGTH}
+              disabled={isLoading}
+            />
+            <PasswordStrengthMeter password={newPassword} />
+          </div>
+
+          <FrostedInput
+            label="Confirm new password"
+            name="confirmPassword"
+            type="password"
+            value={confirmPassword}
+            onChange={setConfirmPassword}
+            placeholder="Confirm your new password"
+            autoComplete="new-password"
+            minLength={MIN_PASSWORD_LENGTH}
+            disabled={isLoading}
+          />
+        </div>
+
+        {errorMessage ? (
+          <div
+            role="alert"
+            className="mt-4 rounded-2xl border border-rose-300/25 bg-rose-950/50 px-4 py-2.5 text-center text-xs text-rose-100 backdrop-blur-md"
+          >
+            {errorMessage}
+          </div>
+        ) : null}
+
+        {successMessage ? (
+          <div
+            role="status"
+            className="mt-4 rounded-2xl border border-emerald-300/25 bg-emerald-950/50 px-4 py-2.5 text-center text-xs text-emerald-100 backdrop-blur-md"
+          >
+            {successMessage}
+          </div>
+        ) : null}
+
+        <button
+          type="submit"
+          disabled={isLoading}
+          className="smoky-cta-btn mt-5 flex h-[46px] w-full cursor-pointer items-center justify-center gap-2 rounded-full text-sm font-medium text-white transition focus:outline-none focus-visible:ring-2 focus-visible:ring-white/45 disabled:cursor-not-allowed disabled:opacity-65"
+        >
+          {isLoading ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+              <span>Updating password...</span>
+            </>
+          ) : (
+            <span>Update Password</span>
+          )}
+        </button>
+      </form>
+    );
   }
 
   if (sentEmail) {
@@ -94,7 +246,7 @@ export function ResetPasswordForm({ isDemoMode }: ResetPasswordFormProps) {
   }
 
   return (
-    <form onSubmit={handleSubmit} noValidate className="my-auto flex flex-col py-4">
+    <form onSubmit={handleRequestSubmit} noValidate className="my-auto flex flex-col py-4">
       <div className="space-y-4">
         <FrostedInput
           label="Email"

@@ -11,11 +11,16 @@ interface AuctionDetailPageProps {
 export default async function AuctionDetailPage({ params }: AuctionDetailPageProps) {
   const { id } = await params;
   const { supabase, user } = await requireAuthenticatedUser();
-  const { auction, bids, isSaved, myProxyMax } = await fetchAuctionDetail(
-    supabase,
-    id,
-    user.id
-  );
+  const {
+    auction,
+    bids,
+    isSaved,
+    myProxyMax,
+    myAutoBid,
+    extensions,
+    assetDocuments,
+    comparableAuctions,
+  } = await fetchAuctionDetail(supabase, id, user.id);
 
   if (!auction) {
     notFound();
@@ -28,6 +33,10 @@ export default async function AuctionDetailPage({ params }: AuctionDetailPagePro
       initialBids={bids}
       initialSaved={isSaved}
       initialMyProxyMax={myProxyMax}
+      initialMyAutoBid={myAutoBid}
+      initialExtensions={extensions}
+      initialDocuments={assetDocuments}
+      comparableAuctions={comparableAuctions}
     />
   );
 }

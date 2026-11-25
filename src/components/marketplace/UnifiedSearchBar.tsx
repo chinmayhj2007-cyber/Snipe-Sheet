@@ -1,6 +1,6 @@
 'use client';
 
-import { Search, SlidersHorizontal, X } from 'lucide-react';
+import { BadgeCheck, Search, SlidersHorizontal, X } from 'lucide-react';
 import { memo, useDeferredValue, useMemo, useState } from 'react';
 import { AuctionCard } from '@/components/marketplace/AuctionCard';
 import {
@@ -14,12 +14,11 @@ interface UnifiedSearchBarProps {
   auctions: AuctionItem[];
   savedSet: Set<string>;
   onToggleSave: (auctionId: string, nextSaved: boolean) => void;
-  viewerRole: 'bidder' | 'seller';
+  viewerRole: 'bidder' | 'seller' | 'admin';
   viewerId: string;
   placeholder?: string;
   initialQuery?: string;
   initialCategory?: string;
-  /** When true (on /search), always show results even with empty query/filters. On home, only show results grid when user actively searches/filters. */
   alwaysShowResults?: boolean;
   externalCategory?: string;
   onExternalCategoryReset?: () => void;
@@ -31,7 +30,7 @@ export const UnifiedSearchBar = memo(function UnifiedSearchBar({
   onToggleSave,
   viewerRole,
   viewerId,
-  placeholder = 'Search laptops, GPUs, flagship phones, cameras...',
+  placeholder = 'Search laptops, GPUs, collectibles, cameras, or seller...',
   initialQuery = '',
   initialCategory = 'All',
   alwaysShowResults = false,
@@ -41,12 +40,12 @@ export const UnifiedSearchBar = memo(function UnifiedSearchBar({
   const [query, setQuery] = useState(initialQuery);
   const [category, setCategory] = useState(initialCategory || 'All');
   const [condition, setCondition] = useState('All');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'live' | 'upcoming' | 'ended'>(
-    'all'
-  );
-  const [sortBy, setSortBy] = useState<'ending' | 'newest' | 'price_asc' | 'price_desc'>(
-    'ending'
-  );
+  const [statusFilter, setStatusFilter] = useState<'all' | 'live' | 'upcoming' | 'ended'>('all');
+  const [endingWithin, setEndingWithin] = useState<'all' | '1h' | '24h' | '7d'>('all');
+  const [minPrice, setMinPrice] = useState('');
+  const [maxPrice, setMaxPrice] = useState('');
+  const [verifiedOnly, setVerifiedOnly] = useState(false);
+  const [sortBy, setSortBy] = useState<'ending' | 'newest' | 'price_asc' | 'price_desc'>('ending');
   const [showAdvanced, setShowAdvanced] = useState(alwaysShowResults);
 
   const activeCategory = externalCategory ?? category;
@@ -57,26 +56,44 @@ export const UnifiedSearchBar = memo(function UnifiedSearchBar({
     deferredQuery.trim().length > 0 ||
     activeCategory !== 'All' ||
     condition !== 'All' ||
-    statusFilter !== 'all';
+    statusFilter !== 'all' ||
+    endingWithin !== 'all' ||
+    minPrice.trim() !== '' ||
+    maxPrice.trim() !== '' ||
+    verifiedOnly;
 
   const filtered = useMemo(() => {
     if (!isFiltering) return [];
     const q = deferredQuery.trim().toLowerCase();
     const now = Date.now();
+    const minP = minPrice.trim() ? Number(minPrice) : null;
+    const maxP = maxPrice.trim() ? Number(maxPrice) : null;
 
     const list = auctions.filter((item) => {
       if (
         q &&
         !item.title.toLowerCase().includes(q) &&
         !item.description.toLowerCase().includes(q) &&
-        !item.category.toLowerCase().includes(q)
+        !item.category.toLowerCase().includes(q) &&
+        !item.seller_name.toLowerCase().includes(q)
       ) {
         return false;
       }
       if (activeCategory !== 'All' && item.category !== activeCategory) return false;
       if (condition !== 'All' && item.condition !== condition) return false;
-      if (statusFilter !== 'all' && getAuctionPhase(item, now) !== statusFilter) {
-        return false;
+      if (statusFilter !== 'all' && getAuctionPhase(item, now) !== statusFilter) return false;
+      if (verifiedOnly && !item.seller_verified) return false;
+      if (minP !== null && Number.isFinite(minP) && item.current_price < minP) return false;
+      if (maxP !== null && Number.isFinite(maxP) && item.current_price > maxP) return false;
+      if (endingWithin !== 'all') {
+        const diffMs = new Date(item.ends_at).getTime() - now;
+        const limitMs =
+          endingWithin === '1h'
+            ? 3600_000
+            : endingWithin === '24h'
+              ? 24 * 3600_000
+              : 7 * 24 * 3600_000;
+        if (diffMs <= 0 || diffMs > limitMs) return false;
       }
       return true;
     });
@@ -89,13 +106,29 @@ export const UnifiedSearchBar = memo(function UnifiedSearchBar({
       }
       return new Date(a.ends_at).getTime() - new Date(b.ends_at).getTime();
     });
-  }, [auctions, deferredQuery, activeCategory, condition, statusFilter, sortBy, isFiltering]);
+  }, [
+    auctions,
+    deferredQuery,
+    activeCategory,
+    condition,
+    statusFilter,
+    endingWithin,
+    minPrice,
+    maxPrice,
+    verifiedOnly,
+    sortBy,
+    isFiltering,
+  ]);
 
   function clearAllFilters() {
     setQuery('');
     setCategory('All');
     setCondition('All');
     setStatusFilter('all');
+    setEndingWithin('all');
+    setMinPrice('');
+    setMaxPrice('');
+    setVerifiedOnly(false);
     onExternalCategoryReset?.();
   }
 
@@ -129,7 +162,7 @@ export const UnifiedSearchBar = memo(function UnifiedSearchBar({
           type="button"
           onClick={() => setShowAdvanced((prev) => !prev)}
           aria-expanded={showAdvanced}
-          className={`flex h-12 shrink-0 cursor-pointer items-center justify-center gap-2 rounded-full border px-5 text-xs font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-white/45 ${
+          className={`flex h-12 shrink-0 cursor-pointer items-center justify-center gap-2 rounded-full border px-5 text-xs font-medium transition ${
             showAdvanced
               ? 'border-white/40 bg-white/15 text-white'
               : 'border-white/20 bg-white/[0.05] text-white/85 hover:border-white/35 hover:bg-white/[0.09]'
@@ -141,7 +174,7 @@ export const UnifiedSearchBar = memo(function UnifiedSearchBar({
       </div>
 
       {/* Category Quick Filter Pills */}
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center gap-1.5">
         <button
           type="button"
           onClick={() => {
@@ -173,7 +206,7 @@ export const UnifiedSearchBar = memo(function UnifiedSearchBar({
                   : 'border-white/15 bg-white/[0.04] text-white/75 hover:border-white/35 hover:text-white'
               }`}
             >
-              {cat.label}
+              {cat.id}
             </button>
           );
         })}
@@ -181,7 +214,7 @@ export const UnifiedSearchBar = memo(function UnifiedSearchBar({
 
       {/* Expandable Filter Row */}
       {showAdvanced ? (
-        <div className="grid gap-2.5 pt-1 sm:grid-cols-3">
+        <div className="grid gap-2.5 pt-1 sm:grid-cols-2 lg:grid-cols-6">
           <select
             aria-label="Condition filter"
             value={condition}
@@ -211,6 +244,38 @@ export const UnifiedSearchBar = memo(function UnifiedSearchBar({
           </select>
 
           <select
+            aria-label="Ending time filter"
+            value={endingWithin}
+            onChange={(e) => setEndingWithin(e.target.value as 'all' | '1h' | '24h' | '7d')}
+            className="h-10 rounded-full border border-white/20 bg-[#0d1016] px-4 text-xs text-white focus:border-white/45 focus:outline-none"
+          >
+            <option value="all">Any Ending Time</option>
+            <option value="1h">Ending in 1 Hour</option>
+            <option value="24h">Ending in 24 Hours</option>
+            <option value="7d">Ending in 7 Days</option>
+          </select>
+
+          <input
+            type="number"
+            min={0}
+            value={minPrice}
+            onChange={(e) => setMinPrice(e.target.value)}
+            placeholder="Min ₹"
+            aria-label="Minimum price"
+            className="h-10 rounded-full border border-white/20 bg-[#0d1016] px-4 text-xs text-white placeholder:text-white/40 focus:border-white/45 focus:outline-none"
+          />
+
+          <input
+            type="number"
+            min={0}
+            value={maxPrice}
+            onChange={(e) => setMaxPrice(e.target.value)}
+            placeholder="Max ₹"
+            aria-label="Maximum price"
+            className="h-10 rounded-full border border-white/20 bg-[#0d1016] px-4 text-xs text-white placeholder:text-white/40 focus:border-white/45 focus:outline-none"
+          />
+
+          <select
             aria-label="Sort order"
             value={sortBy}
             onChange={(e) =>
@@ -223,6 +288,17 @@ export const UnifiedSearchBar = memo(function UnifiedSearchBar({
             <option value="price_asc">Price: Low to High</option>
             <option value="price_desc">Price: High to Low</option>
           </select>
+
+          <label className="flex h-10 cursor-pointer items-center gap-2 rounded-full border border-white/20 bg-[#0d1016] px-4 text-xs text-white/85 sm:col-span-2 lg:col-span-2">
+            <input
+              type="checkbox"
+              checked={verifiedOnly}
+              onChange={(e) => setVerifiedOnly(e.target.checked)}
+              className="h-3.5 w-3.5 accent-emerald-400"
+            />
+            <BadgeCheck className="h-3.5 w-3.5 text-emerald-300" aria-hidden="true" />
+            <span>Verified Sellers Only</span>
+          </label>
         </div>
       ) : null}
 
@@ -234,15 +310,13 @@ export const UnifiedSearchBar = memo(function UnifiedSearchBar({
               Showing {filtered.length} matching{' '}
               {filtered.length === 1 ? 'auction' : 'auctions'}
             </p>
-            {(deferredQuery || activeCategory !== 'All' || condition !== 'All' || statusFilter !== 'all') ? (
-              <button
-                type="button"
-                onClick={clearAllFilters}
-                className="cursor-pointer rounded-full border border-white/20 bg-white/[0.05] px-3 py-1 text-[11px] font-medium text-white/80 hover:border-white/40 hover:text-white"
-              >
-                Clear filters
-              </button>
-            ) : null}
+            <button
+              type="button"
+              onClick={clearAllFilters}
+              className="cursor-pointer rounded-full border border-white/20 bg-white/[0.05] px-3 py-1 text-[11px] font-medium text-white/80 hover:border-white/40 hover:text-white"
+            >
+              Clear filters
+            </button>
           </div>
 
           {filtered.length > 0 ? (

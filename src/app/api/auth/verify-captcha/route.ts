@@ -36,9 +36,9 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  let body: { token?: unknown };
+  let rawBody: unknown;
   try {
-    body = (await request.json()) as { token?: unknown };
+    rawBody = await request.json();
   } catch {
     return NextResponse.json(
       { verified: false, error: 'Invalid verification payload.' },
@@ -46,6 +46,14 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  if (!rawBody || typeof rawBody !== 'object' || Array.isArray(rawBody)) {
+    return NextResponse.json(
+      { verified: false, error: 'Invalid verification payload.' },
+      { status: 400 }
+    );
+  }
+
+  const body = rawBody as { token?: unknown };
   const token = typeof body.token === 'string' ? body.token.trim() : '';
   if (!token || token.length > 4096) {
     return NextResponse.json(
@@ -75,6 +83,7 @@ export async function POST(request: NextRequest) {
       },
       body: formData.toString(),
       cache: 'no-store',
+      signal: AbortSignal.timeout(5000),
     });
 
     if (!verifyRes.ok) {

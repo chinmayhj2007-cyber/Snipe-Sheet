@@ -1,9 +1,17 @@
 import {
+  Award,
   Camera,
+  Car,
   Cpu,
+  Dumbbell,
+  Factory,
   Gamepad2,
+  Gem,
   Headphones,
+  Home,
   Laptop,
+  Palette,
+  Shirt,
   Smartphone,
 } from 'lucide-react';
 import Link from 'next/link';
@@ -17,6 +25,14 @@ const CATEGORY_ICONS = {
   Audio: Headphones,
   Gaming: Gamepad2,
   Cameras: Camera,
+  Collectibles: Gem,
+  Art: Palette,
+  Antiques: Award,
+  Vehicles: Car,
+  Fashion: Shirt,
+  Sports: Dumbbell,
+  Home: Home,
+  Industrial: Factory,
 } as const;
 
 interface CategoryGridProps {
@@ -29,9 +45,9 @@ export const CategoryGrid = memo(function CategoryGrid({
   onSelectCategory,
 }: CategoryGridProps) {
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-7">
       {AUCTION_CATEGORIES.map((category) => {
-        const Icon = CATEGORY_ICONS[category.id];
+        const Icon = CATEGORY_ICONS[category.id] ?? Cpu;
         const count = countsByCategory[category.id] ?? 0;
 
         const cardBody = (

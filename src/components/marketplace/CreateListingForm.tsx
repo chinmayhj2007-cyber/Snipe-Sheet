@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { type ChangeEvent, type FormEvent, useMemo, useRef, useState } from 'react';
+import { type ChangeEvent, type FormEvent, useEffect, useRef, useState } from 'react';
 import { AuctionCard } from '@/components/marketplace/AuctionCard';
 import { MarketplaceNavbar } from '@/components/marketplace/MarketplaceNavbar';
 import { ShinyButton } from '@/components/ui/shiny-button';
@@ -32,19 +32,16 @@ function toLocalDateTimeInput(date: Date): string {
   )}:${pad(date.getMinutes())}`;
 }
 
+function safeIsoString(value: string, fallbackIso: string): string {
+  if (!value) return fallbackIso;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? fallbackIso : parsed.toISOString();
+}
+
 export function CreateListingForm({ user }: CreateListingFormProps) {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const publishInFlightRef = useRef(false);
-
-  const initialDates = useMemo(() => {
-    const start = new Date();
-    const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
-    return {
-      start: toLocalDateTimeInput(start),
-      end: toLocalDateTimeInput(end),
-    };
-  }, []);
 
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -53,14 +50,33 @@ export function CreateListingForm({ user }: CreateListingFormProps) {
   const [startingPrice, setStartingPrice] = useState('5000');
   const [minIncrement, setMinIncrement] = useState('250');
   const [reservePrice, setReservePrice] = useState('');
-  const [startsAt, setStartsAt] = useState(initialDates.start);
-  const [endsAt, setEndsAt] = useState(initialDates.end);
+  const [shippingCost, setShippingCost] = useState('0');
+  const [shippingDetails, setShippingDetails] = useState(
+    'Insured tracked courier dispatch within 48 hours of payment.'
+  );
+  const [deliveryInfo, setDeliveryInfo] = useState('Pan-India delivery in 3-5 business days.');
+  const [returnPolicy, setReturnPolicy] = useState(
+    '7-day SnipeShield escrow protection if item differs from description.'
+  );
+  const [antiSnipeWindowSec, setAntiSnipeWindowSec] = useState('30');
+  const [antiSnipeExtendSec, setAntiSnipeExtendSec] = useState('30');
+  const [maxExtensions, setMaxExtensions] = useState('10');
+  const [startsAt, setStartsAt] = useState('');
+  const [endsAt, setEndsAt] = useState('');
   const [imageUrls, setImageUrls] = useState<string[]>([]);
+  const [failedImages, setFailedImages] = useState<Set<string>>(() => new Set());
 
   const [uploadingImages, setUploadingImages] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    const start = new Date();
+    const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+    setStartsAt((prev) => prev || toLocalDateTimeInput(start));
+    setEndsAt((prev) => prev || toLocalDateTimeInput(end));
+  }, []);
 
   async function handleImageSelection(e: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? []);
@@ -116,6 +132,7 @@ export function CreateListingForm({ user }: CreateListingFormProps) {
     const startNum = Number(startingPrice);
     const incNum = Number(minIncrement);
     const resNum = reservePrice.trim() ? Number(reservePrice) : null;
+    const shipNum = Number(shippingCost) || 0;
 
     if (title.trim().length < 4) {
       setErrorMessage('Please enter an item title (at least 4 characters).');
@@ -144,6 +161,10 @@ export function CreateListingForm({ user }: CreateListingFormProps) {
       setErrorMessage('Please select valid start and end dates.');
       return;
     }
+    if (endDate.getTime() <= Date.now()) {
+      setErrorMessage('Auction end time must be in the future.');
+      return;
+    }
     if (endDate.getTime() <= startDate.getTime() + 5 * 60 * 1000) {
       setErrorMessage('Auction end time must be at least 5 minutes after start time.');
       return;
@@ -164,6 +185,13 @@ export function CreateListingForm({ user }: CreateListingFormProps) {
           startingPrice: startNum,
           minIncrement: incNum,
           reservePrice: resNum,
+          shippingCost: shipNum,
+          shippingDetails,
+          deliveryInfo,
+          returnPolicy,
+          antiSnipeWindowSec: Number(antiSnipeWindowSec) || 30,
+          antiSnipeExtendSec: Number(antiSnipeExtendSec) || 30,
+          maxExtensions: Number(maxExtensions) || 10,
           startsAt: startDate.toISOString(),
           endsAt: endDate.toISOString(),
           imageUrls,
@@ -189,7 +217,9 @@ export function CreateListingForm({ user }: CreateListingFormProps) {
     id: 'preview',
     seller_id: user.id,
     seller_name: user.displayName,
-    title: title.trim() || 'Untitled Tech Item',
+    seller_verified: user.verificationStatus === 'verified',
+    seller_trust_score: user.trustScore ?? 50,
+    title: title.trim() || 'Untitled Item',
     description:
       description.trim() || 'Your detailed item description will appear here for bidders.',
     category,
@@ -203,10 +233,10 @@ export function CreateListingForm({ user }: CreateListingFormProps) {
     highest_bidder_id: null,
     highest_bidder_name: null,
     status: 'active',
-    starts_at: new Date(startsAt || Date.now()).toISOString(),
-    ends_at: new Date(endsAt || Date.now() + 86400000).toISOString(),
+    starts_at: safeIsoString(startsAt, '1970-01-01T00:00:00.000Z'),
+    ends_at: safeIsoString(endsAt, '1970-01-02T00:00:00.000Z'),
     extensions_count: 0,
-    created_at: new Date().toISOString(),
+    created_at: safeIsoString(startsAt, '1970-01-01T00:00:00.000Z'),
     bid_count: 0,
   };
 
@@ -235,7 +265,6 @@ export function CreateListingForm({ user }: CreateListingFormProps) {
         </div>
 
         <div className={`grid gap-7 ${showPreview ? 'lg:grid-cols-[1.45fr_1fr]' : ''}`}>
-          {/* Listing Form Card */}
           <form
             onSubmit={handlePublish}
             className="smoky-glass-card rounded-[34px] border border-white/20 p-6 backdrop-blur-2xl sm:p-8"
@@ -244,14 +273,14 @@ export function CreateListingForm({ user }: CreateListingFormProps) {
               <div>
                 <div className="inline-flex items-center gap-1.5 rounded-full border border-white/20 bg-white/[0.06] px-3 py-1 text-[11px] font-medium text-white/80">
                   <ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />
-                  Seller Verification Active
+                  SnipeShield Listing Studio &bull; Asset Passport Ready
                 </div>
                 <h1 className="mt-3 text-2xl font-semibold tracking-tight text-white">
                   Sell New Item
                 </h1>
                 <p className="mt-1 text-xs text-white/65">
-                  List your gadget with real-time bidding, reserve protection, and 30-second
-                  anti-sniping.
+                  Configure reserve pricing, shipping &amp; return policies, and FAIRClose
+                  anti-sniping rules. You can attach Asset Passport documents after publishing.
                 </p>
               </div>
 
@@ -269,8 +298,11 @@ export function CreateListingForm({ user }: CreateListingFormProps) {
                     >
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
-                        src={url}
+                        src={failedImages.has(url) ? '/snipe-shield-logo.webp' : url}
                         alt={`Product upload ${idx + 1}`}
+                        onError={() =>
+                          setFailedImages((prev) => new Set(prev).add(url))
+                        }
                         className="h-full w-full object-cover"
                       />
                       {idx === 0 ? (
@@ -332,7 +364,7 @@ export function CreateListingForm({ user }: CreateListingFormProps) {
                   placeholder="e.g. MacBook Pro M3 Max 14-inch (Space Black)"
                   maxLength={120}
                   required
-                  className="h-[46px] w-full rounded-full border border-white/20 bg-white/[0.045] px-4 text-sm text-white placeholder:text-white/40 focus:border-white/50 focus:bg-white/[0.08] focus:outline-none focus:ring-2 focus:ring-white/15"
+                  className="h-[46px] w-full rounded-full border border-white/20 bg-white/[0.045] px-4 text-sm text-white placeholder:text-white/40 focus:border-white/50 focus:bg-white/[0.08] focus:outline-none"
                 />
               </div>
 
@@ -351,8 +383,8 @@ export function CreateListingForm({ user }: CreateListingFormProps) {
                   rows={4}
                   maxLength={3000}
                   required
-                  placeholder="Include specs, warranty status, battery health, included accessories..."
-                  className="w-full rounded-3xl border border-white/20 bg-white/[0.045] p-4 text-sm text-white placeholder:text-white/40 focus:border-white/50 focus:bg-white/[0.08] focus:outline-none focus:ring-2 focus:ring-white/15"
+                  placeholder="Include specs, serial/warranty status, condition details, and included accessories..."
+                  className="w-full rounded-3xl border border-white/20 bg-white/[0.045] p-4 text-sm text-white placeholder:text-white/40 focus:border-white/50 focus:bg-white/[0.08] focus:outline-none"
                 />
               </div>
 
@@ -402,66 +434,140 @@ export function CreateListingForm({ user }: CreateListingFormProps) {
               </div>
 
               {/* Pricing */}
-              <div className="grid gap-4 sm:grid-cols-3">
+              <div className="grid gap-4 sm:grid-cols-4">
                 <div>
-                  <label
-                    htmlFor="listing-start-price"
-                    className="mb-1.5 block pl-1 text-xs font-medium text-white/80"
-                  >
+                  <label className="mb-1.5 block pl-1 text-xs font-medium text-white/80">
                     Starting Bid (₹)
                   </label>
                   <input
-                    id="listing-start-price"
                     type="number"
                     min={1}
-                    step="1"
                     value={startingPrice}
                     onChange={(e) => setStartingPrice(e.target.value)}
                     required
-                    className="h-[46px] w-full rounded-full border border-white/20 bg-white/[0.045] px-4 text-sm text-white focus:border-white/50 focus:outline-none"
+                    className="h-[46px] w-full rounded-full border border-white/20 bg-white/[0.045] px-4 text-sm text-white"
                   />
                 </div>
-
                 <div>
-                  <label
-                    htmlFor="listing-min-inc"
-                    className="mb-1.5 block pl-1 text-xs font-medium text-white/80"
-                  >
+                  <label className="mb-1.5 block pl-1 text-xs font-medium text-white/80">
                     Min Increment (₹)
                   </label>
                   <input
-                    id="listing-min-inc"
                     type="number"
                     min={1}
-                    step="1"
                     value={minIncrement}
                     onChange={(e) => setMinIncrement(e.target.value)}
                     required
-                    className="h-[46px] w-full rounded-full border border-white/20 bg-white/[0.045] px-4 text-sm text-white focus:border-white/50 focus:outline-none"
+                    className="h-[46px] w-full rounded-full border border-white/20 bg-white/[0.045] px-4 text-sm text-white"
                   />
                 </div>
-
                 <div>
-                  <label
-                    htmlFor="listing-reserve"
-                    className="mb-1.5 block pl-1 text-xs font-medium text-white/80"
-                  >
-                    Reserve Price (Optional ₹)
+                  <label className="mb-1.5 block pl-1 text-xs font-medium text-white/80">
+                    Reserve (Optional ₹)
                   </label>
                   <input
-                    id="listing-reserve"
                     type="number"
                     min={1}
-                    step="1"
                     value={reservePrice}
                     onChange={(e) => setReservePrice(e.target.value)}
                     placeholder="Hidden min"
-                    className="h-[46px] w-full rounded-full border border-white/20 bg-white/[0.045] px-4 text-sm text-white placeholder:text-white/40 focus:border-white/50 focus:outline-none"
+                    className="h-[46px] w-full rounded-full border border-white/20 bg-white/[0.045] px-4 text-sm text-white placeholder:text-white/40"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1.5 block pl-1 text-xs font-medium text-white/80">
+                    Shipping Fee (₹)
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={shippingCost}
+                    onChange={(e) => setShippingCost(e.target.value)}
+                    className="h-[46px] w-full rounded-full border border-white/20 bg-white/[0.045] px-4 text-sm text-white"
                   />
                 </div>
               </div>
 
-              {/* Start & End Dates */}
+              {/* Shipping, Delivery, Returns */}
+              <div className="grid gap-4 sm:grid-cols-3">
+                <div>
+                  <label className="mb-1.5 block pl-1 text-xs font-medium text-white/80">
+                    Shipping Details
+                  </label>
+                  <input
+                    type="text"
+                    value={shippingDetails}
+                    onChange={(e) => setShippingDetails(e.target.value)}
+                    className="h-11 w-full rounded-full border border-white/20 bg-white/[0.045] px-4 text-xs text-white"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1.5 block pl-1 text-xs font-medium text-white/80">
+                    Delivery Timeline
+                  </label>
+                  <input
+                    type="text"
+                    value={deliveryInfo}
+                    onChange={(e) => setDeliveryInfo(e.target.value)}
+                    className="h-11 w-full rounded-full border border-white/20 bg-white/[0.045] px-4 text-xs text-white"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1.5 block pl-1 text-xs font-medium text-white/80">
+                    Return Policy
+                  </label>
+                  <input
+                    type="text"
+                    value={returnPolicy}
+                    onChange={(e) => setReturnPolicy(e.target.value)}
+                    className="h-11 w-full rounded-full border border-white/20 bg-white/[0.045] px-4 text-xs text-white"
+                  />
+                </div>
+              </div>
+
+              {/* Anti-Snipe Config + Dates */}
+              <div className="grid gap-4 sm:grid-cols-3">
+                <div>
+                  <label className="mb-1.5 block pl-1 text-xs font-medium text-white/80">
+                    Anti-Snipe Window (sec)
+                  </label>
+                  <input
+                    type="number"
+                    min={10}
+                    max={300}
+                    value={antiSnipeWindowSec}
+                    onChange={(e) => setAntiSnipeWindowSec(e.target.value)}
+                    className="h-11 w-full rounded-full border border-white/20 bg-white/[0.045] px-4 text-xs text-white"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1.5 block pl-1 text-xs font-medium text-white/80">
+                    Extension Duration (sec)
+                  </label>
+                  <input
+                    type="number"
+                    min={10}
+                    max={300}
+                    value={antiSnipeExtendSec}
+                    onChange={(e) => setAntiSnipeExtendSec(e.target.value)}
+                    className="h-11 w-full rounded-full border border-white/20 bg-white/[0.045] px-4 text-xs text-white"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1.5 block pl-1 text-xs font-medium text-white/80">
+                    Max Extensions Cap
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={50}
+                    value={maxExtensions}
+                    onChange={(e) => setMaxExtensions(e.target.value)}
+                    className="h-11 w-full rounded-full border border-white/20 bg-white/[0.045] px-4 text-xs text-white"
+                  />
+                </div>
+              </div>
+
               <div className="grid gap-4 sm:grid-cols-2">
                 <div>
                   <label
@@ -476,7 +582,7 @@ export function CreateListingForm({ user }: CreateListingFormProps) {
                     value={startsAt}
                     onChange={(e) => setStartsAt(e.target.value)}
                     required
-                    className="h-[46px] w-full rounded-full border border-white/20 bg-white/[0.045] px-4 text-sm text-white [color-scheme:dark] focus:border-white/50 focus:outline-none"
+                    className="h-[46px] w-full rounded-full border border-white/20 bg-white/[0.045] px-4 text-sm text-white [color-scheme:dark]"
                   />
                 </div>
 
@@ -493,7 +599,7 @@ export function CreateListingForm({ user }: CreateListingFormProps) {
                     value={endsAt}
                     onChange={(e) => setEndsAt(e.target.value)}
                     required
-                    className="h-[46px] w-full rounded-full border border-white/20 bg-white/[0.045] px-4 text-sm text-white [color-scheme:dark] focus:border-white/50 focus:outline-none"
+                    className="h-[46px] w-full rounded-full border border-white/20 bg-white/[0.045] px-4 text-sm text-white [color-scheme:dark]"
                   />
                 </div>
               </div>
@@ -519,8 +625,9 @@ export function CreateListingForm({ user }: CreateListingFormProps) {
 
                 <div className="flex-1">
                   <ShinyButton
+                    type="submit"
+                    disabled={publishing || uploadingImages}
                     label={publishing ? 'Publishing...' : 'Publish Auction'}
-                    onClick={() => void handlePublish()}
                     fillColor="#0b0c10"
                     labelColor="#ffffff"
                     accentColor="#a7adb6"
@@ -534,7 +641,6 @@ export function CreateListingForm({ user }: CreateListingFormProps) {
             </div>
           </form>
 
-          {/* Live Listing Preview */}
           {showPreview ? (
             <aside className="space-y-4">
               <div className="rounded-[28px] border border-white/20 bg-white/[0.04] p-5 backdrop-blur-xl">

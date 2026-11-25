@@ -19,24 +19,33 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized.' }, { status: 401 });
   }
 
-  let body: { auctionId?: unknown };
+  let rawBody: unknown;
   try {
-    body = (await request.json()) as { auctionId?: unknown };
+    rawBody = await request.json();
   } catch {
     return NextResponse.json({ error: 'Invalid request body.' }, { status: 400 });
   }
 
+  if (!rawBody || typeof rawBody !== 'object' || Array.isArray(rawBody)) {
+    return NextResponse.json({ error: 'Invalid request body.' }, { status: 400 });
+  }
+
+  const body = rawBody as { auctionId?: unknown };
   const auctionId = typeof body.auctionId === 'string' ? body.auctionId.trim() : '';
   if (!UUID_REGEX.test(auctionId)) {
     return NextResponse.json({ error: 'Invalid auction identifier.' }, { status: 400 });
   }
 
-  const { data: existing } = await supabase
+  const { data: existing, error: selectError } = await supabase
     .from('saved_items')
     .select('id')
     .eq('user_id', user.id)
     .eq('auction_id', auctionId)
     .maybeSingle();
+
+  if (selectError) {
+    return NextResponse.json({ error: 'Unable to check saved items.' }, { status: 500 });
+  }
 
   if (existing) {
     const { error: delError } = await supabase
@@ -57,7 +66,13 @@ export async function POST(request: NextRequest) {
   });
 
   if (insError) {
-    return NextResponse.json({ error: 'Unable to save auction item.' }, { status: 400 });
+    if (insError.code === '23505') {
+      return NextResponse.json({ saved: true }, { status: 200 });
+    }
+    if (insError.code === '23503') {
+      return NextResponse.json({ error: 'Auction not found.' }, { status: 404 });
+    }
+    return NextResponse.json({ error: 'Unable to save auction item.' }, { status: 500 });
   }
 
   return NextResponse.json({ saved: true }, { status: 200 });

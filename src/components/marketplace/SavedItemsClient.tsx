@@ -2,7 +2,7 @@
 
 import { Bookmark } from 'lucide-react';
 import Link from 'next/link';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { AuctionCard } from '@/components/marketplace/AuctionCard';
 import { MarketplaceNavbar } from '@/components/marketplace/MarketplaceNavbar';
 import type { AuctionItem, MarketplaceUser } from '@/lib/marketplace/types';
@@ -18,6 +18,10 @@ export function SavedItemsClient({
 }: SavedItemsClientProps) {
   const [savedAuctions, setSavedAuctions] = useState<AuctionItem[]>(initialSavedAuctions);
   const homeHref = user.role === 'seller' ? '/seller/home' : '/bidder/home';
+
+  useEffect(() => {
+    setSavedAuctions(initialSavedAuctions);
+  }, [initialSavedAuctions]);
 
   const handleToggleSave = useCallback((auctionId: string, nextSaved: boolean) => {
     if (!nextSaved) {

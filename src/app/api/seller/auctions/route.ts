@@ -4,6 +4,38 @@ import { getSupabaseServerClient } from '@/lib/supabase/server';
 
 const VALID_CATEGORIES = new Set<string>(AUCTION_CATEGORIES.map((c) => c.id));
 const VALID_CONDITIONS = new Set<string>(AUCTION_CONDITIONS);
+const MAX_PRICE_AMOUNT = 100000000;
+const MAX_IMAGES = 5;
+
+function parseStrictFiniteNumber(value: unknown): number | null {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : null;
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    const num = Number(trimmed);
+    return Number.isFinite(num) ? num : null;
+  }
+  return null;
+}
+
+function isValidSellerImageUrl(
+  rawUrl: unknown,
+  expectedOrigin: string | null,
+  sellerId: string
+): rawUrl is string {
+  if (typeof rawUrl !== 'string') return false;
+  try {
+    const parsed = new URL(rawUrl);
+    if (parsed.protocol !== 'https:') return false;
+    if (expectedOrigin && parsed.origin !== expectedOrigin) return false;
+    if (parsed.pathname.includes('..')) return false;
+    return parsed.pathname.startsWith(`/storage/v1/object/public/auction-images/${sellerId}/`);
+  } catch {
+    return false;
+  }
+}
 
 export async function POST(request: NextRequest) {
   const supabase = await getSupabaseServerClient();
@@ -20,11 +52,25 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized.' }, { status: 401 });
   }
 
-  const { data: profile } = await supabase
+  const { data: profile, error: profileError } = await supabase
     .from('profiles')
-    .select('role')
+    .select('role, is_suspended')
     .eq('id', user.id)
     .maybeSingle();
+
+  if (profileError) {
+    return NextResponse.json(
+      { error: 'Unable to verify seller permissions.' },
+      { status: 500 }
+    );
+  }
+
+  if (profile?.is_suspended) {
+    return NextResponse.json(
+      { error: 'Your account is suspended and cannot publish listings.' },
+      { status: 403 }
+    );
+  }
 
   if (profile?.role !== 'seller') {
     return NextResponse.json(
@@ -33,24 +79,44 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  let body: Record<string, unknown>;
+  let rawBody: unknown;
   try {
-    body = (await request.json()) as Record<string, unknown>;
+    rawBody = await request.json();
   } catch {
     return NextResponse.json({ error: 'Invalid request body.' }, { status: 400 });
   }
 
+  if (!rawBody || typeof rawBody !== 'object' || Array.isArray(rawBody)) {
+    return NextResponse.json({ error: 'Invalid request body.' }, { status: 400 });
+  }
+
+  const body = rawBody as Record<string, unknown>;
   const title = typeof body.title === 'string' ? body.title.trim() : '';
   const description = typeof body.description === 'string' ? body.description.trim() : '';
   const category = typeof body.category === 'string' ? body.category.trim() : '';
   const condition = typeof body.condition === 'string' ? body.condition.trim() : '';
-  const startingPrice = Number(body.startingPrice);
-  const minIncrement = Number(body.minIncrement);
+  const startingPrice = parseStrictFiniteNumber(body.startingPrice);
+  const minIncrement = parseStrictFiniteNumber(body.minIncrement);
   const reserveRaw = body.reservePrice;
-  const reservePrice =
-    reserveRaw === null || reserveRaw === undefined || reserveRaw === ''
-      ? null
-      : Number(reserveRaw);
+  const hasReserve = reserveRaw !== null && reserveRaw !== undefined && reserveRaw !== '';
+  const reservePrice = hasReserve ? parseStrictFiniteNumber(reserveRaw) : null;
+  const shippingCost = parseStrictFiniteNumber(body.shippingCost ?? 0) ?? 0;
+  const antiSnipeWindowSec = Math.min(300, Math.max(10, Math.round(parseStrictFiniteNumber(body.antiSnipeWindowSec ?? 30) ?? 30)));
+  const antiSnipeExtendSec = Math.min(300, Math.max(10, Math.round(parseStrictFiniteNumber(body.antiSnipeExtendSec ?? 30) ?? 30)));
+  const maxExtensions = Math.min(50, Math.max(1, Math.round(parseStrictFiniteNumber(body.maxExtensions ?? 10) ?? 10)));
+  const shippingDetails =
+    typeof body.shippingDetails === 'string' && body.shippingDetails.trim()
+      ? body.shippingDetails.trim().slice(0, 500)
+      : 'Insured tracked courier dispatch within 48 hours of payment.';
+  const deliveryInfo =
+    typeof body.deliveryInfo === 'string' && body.deliveryInfo.trim()
+      ? body.deliveryInfo.trim().slice(0, 500)
+      : 'Pan-India delivery in 3-5 business days.';
+  const returnPolicy =
+    typeof body.returnPolicy === 'string' && body.returnPolicy.trim()
+      ? body.returnPolicy.trim().slice(0, 500)
+      : '7-day SnipeShield escrow protection for mismatched descriptions.';
+
   const startsAtRaw = typeof body.startsAt === 'string' ? body.startsAt : '';
   const endsAtRaw = typeof body.endsAt === 'string' ? body.endsAt : '';
   const rawImages = Array.isArray(body.imageUrls) ? body.imageUrls : [];
@@ -77,23 +143,36 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Please choose a valid item condition.' }, { status: 400 });
   }
 
-  if (!Number.isFinite(startingPrice) || startingPrice < 1 || startingPrice > 100000000) {
+  if (startingPrice === null || startingPrice < 1 || startingPrice > MAX_PRICE_AMOUNT) {
     return NextResponse.json(
       { error: 'Starting bid must be a valid amount greater than ₹1.' },
       { status: 400 }
     );
   }
 
-  if (!Number.isFinite(minIncrement) || minIncrement < 1 || minIncrement > 10000000) {
+  if (minIncrement === null || minIncrement < 1 || minIncrement > 10000000) {
     return NextResponse.json(
       { error: 'Minimum bid increment must be at least ₹1.' },
       { status: 400 }
     );
   }
 
-  if (reservePrice !== null && (!Number.isFinite(reservePrice) || reservePrice < startingPrice)) {
+  if (shippingCost < 0 || shippingCost > 100000) {
     return NextResponse.json(
-      { error: 'Reserve price must be greater than or equal to starting price.' },
+      { error: 'Shipping cost must be between ₹0 and ₹1,00,000.' },
+      { status: 400 }
+    );
+  }
+
+  if (
+    hasReserve &&
+    (reservePrice === null || reservePrice < startingPrice || reservePrice > MAX_PRICE_AMOUNT)
+  ) {
+    return NextResponse.json(
+      {
+        error:
+          'Reserve price must be between your starting price and ₹10,00,00,000.',
+      },
       { status: 400 }
     );
   }
@@ -118,11 +197,19 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const supabaseUrlPrefix = (process.env.NEXT_PUBLIC_SUPABASE_URL ?? '').trim();
+  const supabaseUrlRaw = (process.env.NEXT_PUBLIC_SUPABASE_URL ?? '').trim();
+  let expectedOrigin: string | null = null;
+  if (supabaseUrlRaw) {
+    try {
+      expectedOrigin = new URL(supabaseUrlRaw).origin;
+    } catch {
+      expectedOrigin = null;
+    }
+  }
+
   const imageUrls = rawImages
-    .filter((u): u is string => typeof u === 'string' && u.startsWith('https://'))
-    .filter((u) => !supabaseUrlPrefix || u.startsWith(supabaseUrlPrefix))
-    .slice(0, 6);
+    .filter((u): u is string => isValidSellerImageUrl(u, expectedOrigin, user.id))
+    .slice(0, MAX_IMAGES);
 
   const { data: created, error: insertError } = await supabase
     .from('auctions')
@@ -138,6 +225,14 @@ export async function POST(request: NextRequest) {
       reserve_price: reservePrice !== null ? Number(reservePrice.toFixed(2)) : null,
       starts_at: startsAt.toISOString(),
       ends_at: endsAt.toISOString(),
+      original_ends_at: endsAt.toISOString(),
+      shipping_details: shippingDetails,
+      delivery_info: deliveryInfo,
+      return_policy: returnPolicy,
+      shipping_cost: Number(shippingCost.toFixed(2)),
+      anti_snipe_window_sec: antiSnipeWindowSec,
+      anti_snipe_extend_sec: antiSnipeExtendSec,
+      max_extensions: maxExtensions,
       image_url: imageUrls[0] ?? null,
       image_urls: imageUrls,
       status: 'active',
@@ -151,6 +246,14 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     );
   }
+
+  await supabase.from('audit_logs').insert({
+    user_id: user.id,
+    action: 'auction_published',
+    entity_type: 'auction',
+    entity_id: created.id,
+    metadata: { title, category, startingPrice },
+  });
 
   return NextResponse.json({ ok: true, id: created.id }, { status: 201 });
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { MarketplaceNavbar } from '@/components/marketplace/MarketplaceNavbar';
 import { UnifiedSearchBar } from '@/components/marketplace/UnifiedSearchBar';
 import type { AuctionItem, MarketplaceUser } from '@/lib/marketplace/types';
@@ -22,6 +22,10 @@ export function SearchMarketplaceClient({
 }: SearchMarketplaceClientProps) {
   const [savedSet, setSavedSet] = useState<Set<string>>(() => new Set(initialSavedIds));
 
+  useEffect(() => {
+    setSavedSet(new Set(initialSavedIds));
+  }, [initialSavedIds]);
+
   const handleToggleSave = useCallback((auctionId: string, nextSaved: boolean) => {
     setSavedSet((prev) => {
       const next = new Set(prev);
@@ -42,6 +46,7 @@ export function SearchMarketplaceClient({
           </h1>
 
           <UnifiedSearchBar
+            key={`${initialQuery}::${initialCategory}`}
             auctions={initialAuctions}
             savedSet={savedSet}
             onToggleSave={handleToggleSave}

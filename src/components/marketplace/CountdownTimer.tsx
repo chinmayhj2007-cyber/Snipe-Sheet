@@ -11,7 +11,7 @@ interface CountdownTimerProps {
 }
 
 // Single shared 1s clock across all mounted timers; pauses automatically when tab is hidden
-let sharedNow = Date.now();
+let sharedNow: number | null = null;
 let tickerId: number | null = null;
 const listeners = new Set<() => void>();
 
@@ -37,12 +37,16 @@ function handleVisibilityChange() {
 
 function subscribeClock(callback: () => void) {
   listeners.add(callback);
-  if (listeners.size === 1 && typeof window !== 'undefined') {
-    sharedNow = Date.now();
-    if (typeof document === 'undefined' || !document.hidden) {
-      tickerId = window.setInterval(notifyListeners, 1000);
+  if (typeof window !== 'undefined') {
+    if (sharedNow === null || tickerId === null) {
+      sharedNow = Date.now();
     }
-    document.addEventListener('visibilitychange', handleVisibilityChange);
+    if (listeners.size === 1) {
+      if (typeof document === 'undefined' || !document.hidden) {
+        tickerId = window.setInterval(notifyListeners, 1000);
+      }
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+    }
   }
   return () => {
     listeners.delete(callback);
@@ -56,12 +60,15 @@ function subscribeClock(callback: () => void) {
   };
 }
 
-function getClientClock() {
+function getClientClock(): number | null {
+  if (typeof window !== 'undefined' && sharedNow === null) {
+    sharedNow = Date.now();
+  }
   return sharedNow;
 }
 
-function getServerClock() {
-  return 0;
+function getServerClock(): number | null {
+  return null;
 }
 
 function formatDuration(ms: number): string {
@@ -91,8 +98,8 @@ export const CountdownTimer = memo(function CountdownTimer({
   const startMs = new Date(startsAt).getTime();
   const endMs = new Date(endsAt).getTime();
 
-  // During initial SSR snapshot (0), render neutral placeholder matching layout
-  if (nowMs === 0) {
+  // During initial SSR snapshot (null), render neutral placeholder matching layout
+  if (nowMs === null || Number.isNaN(startMs) || Number.isNaN(endMs)) {
     return (
       <span className="inline-flex items-center gap-1 font-mono text-xs font-semibold text-white/75">
         <Clock className="h-3.5 w-3.5 text-[#a7adb6]" aria-hidden="true" />

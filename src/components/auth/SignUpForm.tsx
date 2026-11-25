@@ -75,8 +75,12 @@ export function SignUpForm({ isDemoMode }: SignUpFormProps) {
     setIsLoading(true);
 
     try {
+      const hadToken = Boolean(turnstileToken);
       const captchaCheck = await verifyCaptchaTokenOnServer(turnstileToken);
-      setTurnstileResetSignal((prev) => prev + 1);
+      if (hadToken) {
+        setTurnstileToken(null);
+        setTurnstileResetSignal((prev) => prev + 1);
+      }
       if (!captchaCheck.verified) {
         setErrorMessage(captchaCheck.error);
         return;
@@ -312,13 +316,13 @@ export function SignUpForm({ isDemoMode }: SignUpFormProps) {
             <span>Sign Up</span>
           )}
         </button>
-
-        <OAuthButtons
-          disabled={isLoading}
-          role={role}
-          onStatusMessage={(msg) => setErrorMessage(msg)}
-        />
       </form>
+
+      <OAuthButtons
+        disabled={isLoading}
+        role={role}
+        onStatusMessage={(msg) => setErrorMessage(msg)}
+      />
 
       <LegalModal
         documentType={openLegalDoc}

@@ -109,8 +109,12 @@ export function LoginForm({ isDemoMode, initialNotice }: LoginFormProps) {
     setIsLoading(true);
 
     try {
+      const hadToken = Boolean(turnstileToken);
       const captchaCheck = await verifyCaptchaTokenOnServer(turnstileToken);
-      setTurnstileResetSignal((prev) => prev + 1);
+      if (hadToken) {
+        setTurnstileToken(null);
+        setTurnstileResetSignal((prev) => prev + 1);
+      }
       if (!captchaCheck.verified) {
         setErrorMessage(captchaCheck.error);
         return;
@@ -175,8 +179,12 @@ export function LoginForm({ isDemoMode, initialNotice }: LoginFormProps) {
     setIsLoading(true);
 
     try {
+      const hadToken = Boolean(turnstileToken);
       const captchaCheck = await verifyCaptchaTokenOnServer(turnstileToken);
-      setTurnstileResetSignal((prev) => prev + 1);
+      if (hadToken) {
+        setTurnstileToken(null);
+        setTurnstileResetSignal((prev) => prev + 1);
+      }
       if (!captchaCheck.verified) {
         setErrorMessage(captchaCheck.error);
         return;
@@ -319,6 +327,7 @@ export function LoginForm({ isDemoMode, initialNotice }: LoginFormProps) {
                 type="button"
                 role="checkbox"
                 aria-checked={rememberMe}
+                aria-label="Remember me"
                 onClick={() => setRememberMe((prev) => !prev)}
                 disabled={isLoading}
                 className="flex h-4 w-4 cursor-pointer items-center justify-center rounded-[4px] border border-white/45 bg-white/[0.04] text-white transition hover:border-white/75 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/45"
@@ -443,6 +452,7 @@ export function LoginForm({ isDemoMode, initialNotice }: LoginFormProps) {
                     setOtpCode('');
                     setErrorMessage(null);
                     setInfoMessage(null);
+                    setTurnstileToken(null);
                     setTurnstileResetSignal((prev) => prev + 1);
                   }}
                   className="cursor-pointer font-medium text-white underline-offset-2 hover:underline disabled:opacity-50"

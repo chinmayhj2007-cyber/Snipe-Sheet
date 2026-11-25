@@ -1,4 +1,4 @@
-export type UserRole = 'bidder' | 'seller';
+export type UserRole = 'bidder' | 'seller' | 'admin';
 
 export const MIN_PASSWORD_LENGTH = 8;
 export const MAX_PASSWORD_LENGTH = 128;
@@ -38,7 +38,9 @@ export interface PasswordStrengthResult {
 }
 
 export function normalizeRole(value: unknown): UserRole {
-  return value === 'seller' ? 'seller' : 'bidder';
+  if (value === 'admin') return 'admin';
+  if (value === 'seller') return 'seller';
+  return 'bidder';
 }
 
 export function validateEmail(
@@ -202,9 +204,12 @@ export function validateSignUpInput(input: {
     return { valid: false, message: 'Passwords do not match.' };
   }
 
+  // Public self-signup only permits bidder or seller; admin accounts must be provisioned server-side
+  const safeRole: UserRole = input.role === 'seller' ? 'seller' : 'bidder';
+
   return {
     valid: true,
     email: emailCheck.email,
-    role: normalizeRole(input.role),
+    role: safeRole,
   };
 }

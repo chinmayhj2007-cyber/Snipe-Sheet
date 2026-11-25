@@ -1,6 +1,6 @@
 'use client';
 
-import { ArrowUpRight, Bookmark, Gavel } from 'lucide-react';
+import { ArrowUpRight, BadgeCheck, Bookmark, Gavel, GitCompare } from 'lucide-react';
 import Link from 'next/link';
 import { memo, useEffect, useRef, useState } from 'react';
 import { CountdownTimer } from '@/components/marketplace/CountdownTimer';
@@ -15,7 +15,7 @@ interface AuctionCardProps {
   auction: AuctionItem;
   isSaved: boolean;
   onToggleSave?: (auctionId: string, nextSaved: boolean) => void;
-  viewerRole: 'bidder' | 'seller';
+  viewerRole: 'bidder' | 'seller' | 'admin';
   viewerId?: string;
 }
 
@@ -29,23 +29,48 @@ export const AuctionCard = memo(function AuctionCard({
   const inFlightRef = useRef(false);
   const [saving, setSaving] = useState(false);
   const [localSaved, setLocalSaved] = useState(isSaved);
+  const [inCompare, setInCompare] = useState(false);
+  const [mountedNowMs, setMountedNowMs] = useState<number | null>(null);
+  const [imgError, setImgError] = useState(false);
+
+  const isPreview = auction.id === 'preview';
+  const imageUrl = getPrimaryImage(auction);
 
   useEffect(() => {
     setLocalSaved(isSaved);
   }, [isSaved]);
 
-  const phase = getAuctionPhase(auction);
-  const imageUrl = getPrimaryImage(auction);
+  useEffect(() => {
+    setImgError(false);
+  }, [imageUrl]);
+
+  useEffect(() => {
+    setMountedNowMs(Date.now());
+    if (isPreview) return;
+    try {
+      const raw = localStorage.getItem('snipeshield_compare_ids');
+      const ids = raw ? (JSON.parse(raw) as string[]) : [];
+      setInCompare(Array.isArray(ids) && ids.includes(auction.id));
+    } catch {
+      setInCompare(false);
+    }
+  }, [auction.id, isPreview]);
+
+  const phase =
+    mountedNowMs === null
+      ? auction.status === 'ended' || auction.status === 'cancelled'
+        ? 'ended'
+        : 'live'
+      : getAuctionPhase(auction, mountedNowMs);
   const isOwnListing = viewerId === auction.seller_id;
 
   async function handleSaveToggle(e: React.MouseEvent) {
     e.preventDefault();
     e.stopPropagation();
-    if (inFlightRef.current || saving) return;
+    if (isPreview || inFlightRef.current || saving) return;
     inFlightRef.current = true;
     setSaving(true);
 
-    // Optimistic toggle for immediate tactile response
     const previous = localSaved;
     setLocalSaved(!previous);
 
@@ -70,17 +95,41 @@ export const AuctionCard = memo(function AuctionCard({
     }
   }
 
+  function handleCompareToggle(e: React.MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (isPreview) return;
+    try {
+      const raw = localStorage.getItem('snipeshield_compare_ids');
+      const prev = raw ? (JSON.parse(raw) as string[]) : [];
+      const current = Array.isArray(prev) ? prev : [];
+      let next: string[];
+      if (current.includes(auction.id)) {
+        next = current.filter((id) => id !== auction.id);
+        setInCompare(false);
+      } else {
+        next = [...current.slice(-3), auction.id];
+        setInCompare(true);
+      }
+      localStorage.setItem('snipeshield_compare_ids', JSON.stringify(next));
+      window.dispatchEvent(new Event('snipeshield-compare-change'));
+    } catch {
+      // ignore
+    }
+  }
+
   return (
     <article className="group relative flex flex-col overflow-hidden rounded-[28px] border border-white/18 bg-[#0e1015]/90 transition-[border-color,background-color,box-shadow] duration-200 hover:border-white/35 hover:bg-[#13161d]/95 hover:shadow-[0_18px_42px_rgba(0,0,0,0.55)]">
       {/* Image Header */}
       <div className="relative aspect-[16/10] w-full overflow-hidden border-b border-white/10 bg-[#0b0c10]">
-        {imageUrl ? (
+        {imageUrl && !imgError ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={imageUrl}
             alt={auction.title}
             loading="lazy"
             decoding="async"
+            onError={() => setImgError(true)}
             className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.02]"
           />
         ) : (
@@ -100,7 +149,7 @@ export const AuctionCard = memo(function AuctionCard({
 
         {/* Top badges */}
         <div className="absolute inset-x-3 top-3 flex items-center justify-between gap-2">
-          <div className="flex items-center gap-1.5">
+          <div className="flex flex-wrap items-center gap-1.5">
             <span
               className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${
                 phase === 'live'
@@ -119,24 +168,51 @@ export const AuctionCard = memo(function AuctionCard({
             <span className="rounded-full border border-white/20 bg-black/75 px-2.5 py-0.5 text-[10px] font-medium text-white/80">
               {auction.condition}
             </span>
+
+            {auction.is_demo ? (
+              <span className="rounded-full border border-amber-300/40 bg-amber-950/85 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-amber-200">
+                DEMO
+              </span>
+            ) : null}
           </div>
 
-          <button
-            type="button"
-            onClick={handleSaveToggle}
-            disabled={saving}
-            aria-label={localSaved ? 'Remove from saved items' : 'Save auction item'}
-            className={`flex h-8 w-8 cursor-pointer items-center justify-center rounded-full border transition focus:outline-none focus-visible:ring-2 focus-visible:ring-white/45 ${
-              localSaved
-                ? 'border-white/50 bg-[#e2e4e8] text-neutral-950'
-                : 'border-white/20 bg-black/70 text-white/80 hover:border-white/40 hover:text-white'
-            }`}
-          >
-            <Bookmark
-              className={`h-3.5 w-3.5 ${localSaved ? 'fill-current' : ''}`}
-              aria-hidden="true"
-            />
-          </button>
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={handleCompareToggle}
+              disabled={isPreview}
+              aria-label={inCompare ? 'Remove from comparison' : 'Compare item'}
+              title={inCompare ? 'In Compare list' : 'Add to Compare'}
+              className={`flex h-8 w-8 items-center justify-center rounded-full border transition ${
+                isPreview ? 'cursor-default opacity-60' : 'cursor-pointer'
+              } ${
+                inCompare
+                  ? 'border-white/50 bg-white text-neutral-950'
+                  : 'border-white/20 bg-black/70 text-white/80 hover:border-white/40 hover:text-white'
+              }`}
+            >
+              <GitCompare className="h-3.5 w-3.5" aria-hidden="true" />
+            </button>
+
+            <button
+              type="button"
+              onClick={handleSaveToggle}
+              disabled={saving || isPreview}
+              aria-label={localSaved ? 'Remove from saved items' : 'Save auction item'}
+              className={`flex h-8 w-8 items-center justify-center rounded-full border transition focus:outline-none focus-visible:ring-2 focus-visible:ring-white/45 ${
+                isPreview ? 'cursor-default opacity-60' : 'cursor-pointer'
+              } ${
+                localSaved
+                  ? 'border-white/50 bg-[#e2e4e8] text-neutral-950'
+                  : 'border-white/20 bg-black/70 text-white/80 hover:border-white/40 hover:text-white'
+              }`}
+            >
+              <Bookmark
+                className={`h-3.5 w-3.5 ${localSaved ? 'fill-current' : ''}`}
+                aria-hidden="true"
+              />
+            </button>
+          </div>
         </div>
       </div>
 
@@ -148,13 +224,43 @@ export const AuctionCard = memo(function AuctionCard({
             <span>{auction.bid_count ?? 0} bids</span>
           </div>
 
-          <Link href={`/auctions/${auction.id}`} prefetch className="mt-1.5 block">
-            <h3 className="line-clamp-1 text-base font-semibold tracking-tight text-white transition group-hover:text-[#e2e4e8]">
-              {auction.title}
-            </h3>
-          </Link>
+          {isPreview ? (
+            <div className="mt-1.5 block">
+              <h3 className="line-clamp-1 text-base font-semibold tracking-tight text-white">
+                {auction.title}
+              </h3>
+            </div>
+          ) : (
+            <Link href={`/auctions/${auction.id}`} prefetch className="mt-1.5 block">
+              <h3 className="line-clamp-1 text-base font-semibold tracking-tight text-white transition group-hover:text-[#e2e4e8]">
+                {auction.title}
+              </h3>
+            </Link>
+          )}
 
-          <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-white/60">
+          {/* Seller + Verification */}
+          <div className="mt-1 flex items-center gap-1.5 text-[11px] text-white/65">
+            {isPreview ? (
+              <span className="truncate">{auction.seller_name}</span>
+            ) : (
+              <Link
+                href={`/sellers/${auction.seller_id}`}
+                className="inline-flex items-center gap-1 truncate hover:text-white hover:underline"
+              >
+                <span className="truncate">{auction.seller_name}</span>
+                {auction.seller_verified ? (
+                  <BadgeCheck className="h-3.5 w-3.5 shrink-0 text-emerald-300" aria-label="Verified Seller" />
+                ) : null}
+              </Link>
+            )}
+            {auction.seller_trust_score !== undefined ? (
+              <span className="ml-auto shrink-0 rounded-full border border-white/15 bg-white/[0.04] px-2 py-0.5 text-[10px] text-white/75">
+                Trust {auction.seller_trust_score}
+              </span>
+            ) : null}
+          </div>
+
+          <p className="mt-1.5 line-clamp-2 text-xs leading-relaxed text-white/60">
             {auction.description}
           </p>
         </div>
@@ -168,6 +274,11 @@ export const AuctionCard = memo(function AuctionCard({
               <p className="mt-0.5 text-lg font-semibold tracking-tight text-white">
                 {formatINR(auction.current_price)}
               </p>
+              {auction.highest_bidder_id ? (
+                <p className="text-[10px] text-white/45">
+                  Start: {formatINR(auction.starting_price)}
+                </p>
+              ) : null}
             </div>
 
             <div className="text-right">
@@ -185,23 +296,34 @@ export const AuctionCard = memo(function AuctionCard({
             </div>
           </div>
 
-          <Link
-            href={`/auctions/${auction.id}`}
-            prefetch
-            className="smoky-cta-btn flex h-10 w-full items-center justify-center gap-1.5 rounded-full text-xs font-medium text-white transition focus:outline-none focus-visible:ring-2 focus-visible:ring-white/45"
-          >
-            {viewerRole === 'bidder' && !isOwnListing && phase === 'live' ? (
-              <>
-                <Gavel className="h-3.5 w-3.5" aria-hidden="true" />
-                <span>Place Bid</span>
-              </>
-            ) : (
-              <>
-                <span>{isOwnListing ? 'Manage / View Live' : 'View Auction'}</span>
-                <ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" />
-              </>
-            )}
-          </Link>
+          {isPreview ? (
+            <button
+              type="button"
+              disabled
+              className="smoky-cta-btn flex h-10 w-full cursor-default items-center justify-center gap-1.5 rounded-full text-xs font-medium text-white/75 opacity-80"
+            >
+              <Gavel className="h-3.5 w-3.5" aria-hidden="true" />
+              <span>Preview Card</span>
+            </button>
+          ) : (
+            <Link
+              href={`/auctions/${auction.id}`}
+              prefetch
+              className="smoky-cta-btn flex h-10 w-full items-center justify-center gap-1.5 rounded-full text-xs font-medium text-white transition focus:outline-none focus-visible:ring-2 focus-visible:ring-white/45"
+            >
+              {viewerRole === 'bidder' && !isOwnListing && phase === 'live' ? (
+                <>
+                  <Gavel className="h-3.5 w-3.5" aria-hidden="true" />
+                  <span>Place Bid</span>
+                </>
+              ) : (
+                <>
+                  <span>{isOwnListing ? 'Manage / View Live' : 'View Auction'}</span>
+                  <ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" />
+                </>
+              )}
+            </Link>
+          )}
         </div>
       </div>
     </article>

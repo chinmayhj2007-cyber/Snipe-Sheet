@@ -6,9 +6,15 @@ const PROTECTED_PREFIXES = [
   '/dashboard',
   '/bidder',
   '/seller',
+  '/admin',
   '/profile',
   '/search',
   '/auctions',
+  '/autobid',
+  '/orders',
+  '/notifications',
+  '/compare',
+  '/sellers',
 ];
 const AUTH_ROUTES = ['/login', '/signup'];
 
@@ -45,8 +51,6 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.next({ request });
   }
 
-  // Skip remote auth revalidation during background Link prefetches when session cookies exist;
-  // Server Components still enforce authoritative supabase.auth.getUser() before rendering data.
   const isPrefetch =
     request.headers.get('next-router-prefetch') === '1' ||
     request.headers.get('purpose') === 'prefetch';
@@ -80,7 +84,6 @@ export async function updateSession(request: NextRequest) {
     },
   });
 
-  // Always revalidate the session with Supabase Auth on the server.
   const {
     data: { user },
   } = await supabase.auth.getUser();

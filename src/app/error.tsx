@@ -4,14 +4,18 @@ import Link from 'next/link';
 import { useEffect } from 'react';
 
 export default function GlobalAuthError({
-  reset,
+  error,
+  retry,
 }: {
-  error: Error & { digest?: string };
-  reset: () => void;
+  error: unknown;
+  retry: () => void;
 }) {
   useEffect(() => {
     // Keep error handling safe without printing sensitive payloads.
-  }, []);
+    if (error instanceof Error && 'digest' in error && typeof error.digest === 'string') {
+      console.error('Route error digest:', error.digest);
+    }
+  }, [error]);
 
   return (
     <main className="smoky-ambient-page flex min-h-dvh w-full items-center justify-center sm:p-6">
@@ -28,7 +32,7 @@ export default function GlobalAuthError({
         <div className="mt-8 flex w-full flex-col gap-3">
           <button
             type="button"
-            onClick={reset}
+            onClick={() => retry()}
             className="smoky-cta-btn h-12 w-full cursor-pointer rounded-full text-sm font-medium text-white transition"
           >
             Try Again
