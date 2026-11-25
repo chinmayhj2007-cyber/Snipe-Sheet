@@ -6,7 +6,11 @@ import { useRef, useState } from 'react';
 import { mapAuthError } from '@/lib/auth/errors';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 
-export function LogoutButton() {
+interface LogoutButtonProps {
+  variant?: 'primary' | 'secondary';
+}
+
+export function LogoutButton({ variant = 'primary' }: LogoutButtonProps) {
   const router = useRouter();
   const inFlightRef = useRef(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -57,7 +61,11 @@ export function LogoutButton() {
         type="button"
         onClick={handleLogout}
         disabled={isLoading}
-        className="smoky-cta-btn flex h-[46px] w-full cursor-pointer items-center justify-center gap-2 rounded-full text-sm font-medium text-white transition focus:outline-none focus-visible:ring-2 focus-visible:ring-white/45 disabled:cursor-not-allowed disabled:opacity-65"
+        className={
+          variant === 'secondary'
+            ? 'flex h-[46px] w-full cursor-pointer items-center justify-center gap-2 rounded-full border border-white/18 bg-white/[0.04] px-4 text-sm font-medium text-white/90 backdrop-blur-md transition hover:border-white/35 hover:bg-white/[0.09] focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40 disabled:cursor-not-allowed disabled:opacity-60'
+            : 'smoky-cta-btn flex h-[46px] w-full cursor-pointer items-center justify-center gap-2 rounded-full text-sm font-medium text-white transition focus:outline-none focus-visible:ring-2 focus-visible:ring-white/45 disabled:cursor-not-allowed disabled:opacity-65'
+        }
       >
         {isLoading ? (
           <>
