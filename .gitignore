@@ -34,3 +34,6 @@ Thumbs.db
 # Security audit reports (do not commit to public repo)
 AUDIT.md
 
+
+.vercel
+.env*
